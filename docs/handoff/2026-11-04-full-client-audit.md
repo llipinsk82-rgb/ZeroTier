@@ -59,3 +59,22 @@ Build/unit success does not prove VPN, routes, split routing, reboot, recovery, 
 | Release readiness | Draft preview, not production approved; stable signing still needed |
 
 No APK was installed on TCL. Original ZeroTier and production gateways remain unchanged. Continue with an agreed TV test window, new-node authorization, route/egress tests for both gateways, exclusions, DNS, reboot and forced disconnect recovery. Follow installation/rollback steps in README-BLACKSERV-TV.md. A main-thread join can still stall shutdown; do not claim complete fault tolerance before stress testing.
+
+## Follow-up 1.1.1 — deleted tuner card regression
+
+The 1.1.0 preview was subsequently installed on TCL alongside the original client. Its node ID is `18b075ea40`; tuner #9 authorization was confirmed, but no managed ZeroTier address was assigned and VPN/Polish egress/DNS remain **NOT VERIFIED**. No controller, tuner, route, DNS or addressing changes were made during this fix.
+
+Root cause: `TvHomeActivity.render()` deliberately recreated placeholder cards for absent `#5` and `#9` profiles. The stored profile was deleted correctly, but the placeholder used the same tag and looked like a remaining empty tuner. The fixed renderer creates cards only from persisted profiles. Adding a profile remains available through Settings → Profile tunerów → Dodaj profil.
+
+Regression evidence on BS-TEST01:
+
+- Before the fix, `TvProfileDeletionTest` failed on both the immediate deleted-card assertion and the all-profiles-removed case.
+- After the fix, `:app:testDebugUnitTest :app:assembleDebug :app:lintDebug`: **PASS**.
+- JUnit XML: **60 tests, 0 failures, 0 errors, 0 skipped**. The four new activity-level tests cover immediate removal, recreation after Activity restart, explicit persistence of an empty profile list, retained local network membership, and re-adding the same tuner twice without duplicate cards or profiles.
+- Lint: **0 errors, 155 warnings**. No new blanket suppression.
+- Clean pinned checkout plus all six ordered patches: PASS; the three changed implementation/test files match the working source byte-for-byte.
+- APK metadata: package `uk.blackserv.zerotiertv`, versionCode 16, versionName `1.1.1-tv-preview`; JNI includes `armeabi-v7a` required by TCL.
+- APK: **21,304,948 bytes**; SHA-256 `4ea1740b2165b38f6f3a70f623e32f9db8e3c2c2fd13d9ce7c148caee96e6092`.
+- `apksigner verify --verbose`: exit 0. This remains a debug-signed preview.
+
+Deleting a profile only changes this app's local JSON/preferences and card list. It neither deletes the ZeroTier controller member nor removes the app's local network database row. Version 1.1.1 has not been installed on TCL, and no active VPN was switched for this verification. The launcher icon is intentionally unchanged pending Lucas's selection from the presented proposals.

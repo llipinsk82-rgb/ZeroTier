@@ -1,0 +1,52 @@
+diff --git a/app/build.gradle b/app/build.gradle
+index 80e8a90..054aa7f 100644
+--- a/app/build.gradle
++++ b/app/build.gradle
+@@ -15,13 +15,15 @@ android {
+         applicationId "uk.blackserv.zerotiertv"
+         minSdkVersion 23
+         targetSdkVersion rootProject.ext.targetSdkVersion
+-        versionCode 15
+-        versionName "1.1.0-tv-preview"
++        versionCode 16
++        versionName "1.1.1-tv-preview"
+         multiDexEnabled true
+ 
+         testInstrumentationRunner 'androidx.test.runner.AndroidJUnitRunner'
+     }
+ 
++    testOptions { unitTests.includeAndroidResources = true }
++
+     buildTypes {
+         release {
+             minifyEnabled false
+@@ -58,6 +60,7 @@ dependencies {
+     implementation 'commons-io:commons-io:2.11.0'
+     coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs_nio:2.0.4'
+     testImplementation 'junit:junit:4.13.2'
++    testImplementation 'org.robolectric:robolectric:4.11.1'
+     testImplementation 'org.json:json:20231013'
+     androidTestImplementation 'androidx.test.ext:junit:1.1.5'
+     androidTestImplementation 'androidx.test.espresso:espresso-core:3.5.1'
+diff --git a/app/src/main/java/net/kaaass/zerotierfix/ui/tv/TvHomeActivity.java b/app/src/main/java/net/kaaass/zerotierfix/ui/tv/TvHomeActivity.java
+index e9b7984..1ac98bb 100644
+--- a/app/src/main/java/net/kaaass/zerotierfix/ui/tv/TvHomeActivity.java
++++ b/app/src/main/java/net/kaaass/zerotierfix/ui/tv/TvHomeActivity.java
+@@ -193,17 +193,6 @@ public final class TvHomeActivity extends AppCompatActivity {
+                 break;
+             }
+         }
+-        for (String slot : new String[]{"#5", "#9"}) {
+-            boolean configured = false;
+-            for (TvGatewayProfile p : gateways) if (p.getTunerId().equals(slot)) configured = true;
+-            if (!configured) {
+-                TextView empty = action("Tuner " + slot + " — Polska\nBrak konfiguracji bramy · OK: ustaw", () -> showProfileDialog(slot, null));
+-                empty.setTag(slot);
+-                empty.setMinimumHeight(dp(112));
+-                cards.addView(empty, verticalSpace(12));
+-            }
+-        }
+-
+         for (int index = 0; index < gateways.size(); index++) {
+             TvGatewayProfile profile = gateways.get(index);
+             boolean joined = serviceRunning && networkReady

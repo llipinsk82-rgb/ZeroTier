@@ -8,4 +8,4 @@ Native Android TV ZeroTier client with a separate Android package, real JNI VPN 
 - [Audit and test evidence](docs/handoff/2026-11-04-full-client-audit.md)
 - [Design](DESIGN.md)
 
-Reconstruct the pinned Android source using the bootstrap script and all five patches. Build locally; no GitHub Actions.
+Reconstruct the pinned Android source using the bootstrap script and all six patches. Build locally; no GitHub Actions.

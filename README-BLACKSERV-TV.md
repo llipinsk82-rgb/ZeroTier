@@ -1,4 +1,4 @@
-# BlackServ ZeroTier TV — 1.1.0 preview
+# BlackServ ZeroTier TV — 1.1.1 preview
 
 Native Android TV client based on [ZerotierFix](https://github.com/kaaass/ZerotierFix), with the ZeroTier JNI core and Android `VpnService`. Package `uk.blackserv.zerotiertv` is separate from the original `com.zerotier.one`.
 
@@ -15,7 +15,7 @@ Native Android TV client based on [ZerotierFix](https://github.com/kaaass/Zeroti
 
 ## Source and reproducible build
 
-`app/src/...` contains selected standalone model snapshots, not a complete Android project. The complete source is reconstructed using **all five ordered patches** against ZerotierFix `0373a58c03ffe053e92212a6fa2d98245db8aa9c`. The pinned native submodule is `d028a24795e4348615783f8f8b95207035595f56`.
+`app/src/...` contains selected standalone model snapshots, not a complete Android project. The complete source is reconstructed using **all six ordered patches** against ZerotierFix `0373a58c03ffe053e92212a6fa2d98245db8aa9c`. The pinned native submodule is `d028a24795e4348615783f8f8b95207035595f56`.
 
 Windows:
 

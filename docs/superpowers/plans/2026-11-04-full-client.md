@@ -14,4 +14,4 @@ Review focus: denied network; stale async probe after switch; absent/invalid bac
 
 Status: audit found existing JNI integration, historical 47-test build only; fresh bypass regression reproduced on BS-TEST01. Windows build host and TCL Android 14 armeabi-v7a verified read-only. No TV install or VPN change yet.
 
-Checkpoint: implementation and local build complete for preview; 56 tests PASS, lint 0 errors/155 warnings. Clean five-patch reconstruction and remote source hashes match. Device acceptance and full IPv6 exit remain open; see final audit.
+Checkpoint: 1.1.1 deletion fix built locally; 60 tests PASS, lint 0 errors/155 warnings. Clean six-patch reconstruction matches the implementation. Device VPN acceptance remains open; IPv6 is outside the private-app scope.

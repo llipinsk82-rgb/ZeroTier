@@ -237,7 +237,7 @@ index 0000000..157e8ed
 +public final class VpnBypassConfig {
 +    public static final String PREF_KEY = "blackserv_vpn_bypass_packages";
 +    private static final String DEFAULT_PACKAGES =
-+            "com.android.vending,com.planetapl.tv.Player";
++            "com.android.vending";
 +    private static final Pattern PACKAGE_NAME = Pattern.compile(
 +            "[A-Za-z_][A-Za-z_0-9]*(\\.[A-Za-z_][A-Za-z_0-9]*)+");
 +
@@ -1392,9 +1392,9 @@ index 0000000..306e954
 +
 +public class VpnBypassConfigTest {
 +    @Test
-+    public void defaultsExcludePlayStoreAndPlanetaPlTv() {
++    public void defaultsKeepPlanetaPlTvInsideVpn() {
 +        assertEquals(
-+                Arrays.asList("com.android.vending", "com.planetapl.tv.Player"),
++                Collections.singletonList("com.android.vending"),
 +                VpnBypassConfig.parse(null));
 +    }
 +

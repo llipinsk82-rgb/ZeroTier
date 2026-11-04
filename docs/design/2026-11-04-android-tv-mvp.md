@@ -13,7 +13,7 @@ Natywna aplikacja Android TV obsługiwana wyłącznie pilotem, korzystająca z r
 1. Ekran TV: nazwa BlackServ ZeroTier TV, node ID, stan VPN, wielkie kafelki z focus ringiem (D-pad).
 2. Kafelek: etykieta tunera (tylko potwierdzona), BlackServ ID/model (tylko zweryfikowane), ZeroTier network ID, obecny status. OK przełącza ON/OFF, wybranie innego gateway rozłącza poprzedni i uruchamia nowy po potwierdzeniu.
 3. Statusy: szary rozłączono, bursztyn łączenie, zielony wyłącznie po faktycznym sprawdzeniu VPN i kraju/IP wyjścia, czerwony problem. Kolor + opis tekstowy.
-4. Wyjątki VPN: lista zainstalowanych aplikacji TV z checkboxami. PlanetaPLTV (`com.planetapl.tv.Player`) proponowana jako wyjątek domyślny tylko jeśli pakiet na TV istnieje; każda zmiana wymaga odbudowy tunelu. Żadnego `QUERY_ALL_PACKAGES` bez potrzeby.
+4. Wyjątki VPN: lista zainstalowanych aplikacji TV z checkboxami. PlanetaPLTV (`com.planetapl.tv.Player`) musi domyślnie korzystać z polskiego wyjścia VPN, więc **nie** może być domyślnym wyjątkiem. Wykluczenie PlanetaTV wyłącznie na wyraźne życzenie użytkownika. Każda zmiana wymaga odbudowy tunelu. Żadnego `QUERY_ALL_PACKAGES` bez potrzeby.
 5. Dodawanie sieci, wyświetlanie komunikatu błędu i możliwość powrotu pilota.
 
 ## Inwarianty

@@ -9,9 +9,9 @@ import static org.junit.Assert.assertEquals;
 
 public class VpnBypassConfigTest {
     @Test
-    public void defaultsExcludePlayStoreAndPlanetaPlTv() {
+    public void defaultsKeepPlanetaPlTvInsideVpn() {
         assertEquals(
-                Arrays.asList("com.android.vending", "com.planetapl.tv.Player"),
+                Collections.singletonList("com.android.vending"),
                 VpnBypassConfig.parse(null));
     }
 

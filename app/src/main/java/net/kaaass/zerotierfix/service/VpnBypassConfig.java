@@ -16,7 +16,7 @@ import java.util.regex.Pattern;
 public final class VpnBypassConfig {
     public static final String PREF_KEY = "blackserv_vpn_bypass_packages";
     private static final String DEFAULT_PACKAGES =
-            "com.android.vending";
+            "";
     private static final Pattern PACKAGE_NAME = Pattern.compile(
             "[A-Za-z_][A-Za-z_0-9]*(\\.[A-Za-z_][A-Za-z_0-9]*)+");
 

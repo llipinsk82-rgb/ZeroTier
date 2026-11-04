@@ -36,3 +36,11 @@ Polish primary, concise labels: „Połącz”, „Rozłącz”, „Łączenie�
 
 ## Runtime ownership
 Colors/spacing will be placed in shared Android resources (`values/colors.xml`, `dimens.xml`), not copied independently across layouts. This document is the normative reference until imported upstream resources are inspected.
+
+## Full-client revision 2026-11-04
+- A single TV launcher and one Settings dialog own navigation. No phone network-list entry on home.
+- Two predefined editable profiles use controller-advertised next hops verified read-only on 2026-11-04. They are never automatically connected.
+- All applications go through VPN by default. Exceptions are selected explicitly; toggling a row preserves D-pad focus.
+- JSON import validates the full document before a confirmation replaces settings. It disconnects, preserves identity, and does not reconnect.
+- Diagnostic services: ipify (IPv4), ipwho.is (approximate IP geography), Cloudflare (bounded HTTPS throughput), bash.ws (authoritative DNS observations). Service errors never manufacture PASS.
+- Explicit IPv4 exits block IPv6 until a real IPv6 gateway is verified. DNS settings accept IPv4/IPv6 literals, but IPv4 exit mode requires at least one IPv4 DNS.

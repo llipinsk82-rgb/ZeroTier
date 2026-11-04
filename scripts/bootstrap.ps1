@@ -9,7 +9,8 @@ $pinnedSha = '0373a58c03ffe053e92212a6fa2d98245db8aa9c'
 $patchNames = @(
     '0001-blackserv-zerotier-tv.patch',
     '0002-disable-ipv6-for-explicit-ipv4-exit.patch',
-    '0003-verify-pinned-public-ipv4-exit.patch'
+    '0003-verify-pinned-public-ipv4-exit.patch',
+    '0004-include-zerotier-java-sdk-sources.patch'
 )
 $patches = @($patchNames | ForEach-Object { Join-Path $PSScriptRoot ('..\patches\' + $_) })
 

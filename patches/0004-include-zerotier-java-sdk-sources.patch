@@ -1,0 +1,17 @@
+diff --git a/core/build.gradle b/core/build.gradle
+index eb79e38..bc9c24e 100644
+--- a/core/build.gradle
++++ b/core/build.gradle
+@@ -5,6 +5,12 @@ plugins {
+ android {
+     compileSdkVersion rootProject.ext.compileSdkVersion
+ 
++    sourceSets {
++        main {
++            java.srcDir('../externals/core/java/src')
++        }
++    }
++
+     defaultConfig {
+         minSdkVersion rootProject.ext.minSdkVersion
+         targetSdkVersion rootProject.ext.targetSdkVersion

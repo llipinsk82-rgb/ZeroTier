@@ -78,3 +78,18 @@ Regression evidence on BS-TEST01:
 - `apksigner verify --verbose`: exit 0. This remains a debug-signed preview.
 
 Deleting a profile only changes this app's local JSON/preferences and card list. It neither deletes the ZeroTier controller member nor removes the app's local network database row. Version 1.1.1 has not been installed on TCL, and no active VPN was switched for this verification. The launcher icon is intentionally unchanged pending Lucas's selection from the presented proposals.
+
+## Follow-up 1.1.2 — Android TV artwork
+
+Lucas selected the shield/globe/VPN direction and supplied the source image. It was adapted into two distinct resources without stretching: a 320×180 TV banner with safe margins and a 512×512 system icon using the same mark. The manifest now uses `tv_banner` only for the Leanback launcher banner and `tv_icon` for normal/round icon slots; the old 320×180 vector is removed.
+
+- `:app:testDebugUnitTest :app:assembleDebug :app:lintDebug`: **PASS**.
+- JUnit XML: **60 tests, 0 failures, 0 errors, 0 skipped**.
+- Lint: **0 errors, 155 warnings**.
+- `aapt`: Leanback activity points to `res/drawable-nodpi-v4/tv_banner.png`; APK contains both `tv_banner.png` and `tv_icon.png`.
+- APK metadata: versionCode 17, versionName `1.1.2-tv-preview`.
+- APK: **21,538,263 bytes**; SHA-256 `f741998ecdf576adc8db3e9889ab59aab43ccc861f8d6bcf406e4407ea22e959`.
+- `apksigner verify --verbose`: exit 0; debug-signed preview.
+- Clean icon patch application reproduced both PNG files byte-for-byte.
+
+Version 1.1.2 has not been installed on TCL. VPN, managed address, Polish public IP and DNS remain unverified, and the original ZeroTier package remains untouched.

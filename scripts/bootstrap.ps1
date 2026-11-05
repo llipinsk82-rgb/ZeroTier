@@ -12,7 +12,8 @@ $patchNames = @(
     '0003-verify-pinned-public-ipv4-exit.patch',
     '0004-include-zerotier-java-sdk-sources.patch',
     '0005-full-tv-client.patch',
-    '0006-fix-deleted-tuner-cards.patch'
+    '0006-fix-deleted-tuner-cards.patch',
+    '0007-add-vpn-tv-launcher-artwork.patch'
 )
 $patches = @($patchNames | ForEach-Object { Join-Path $PSScriptRoot ('..\patches\' + $_) })
 

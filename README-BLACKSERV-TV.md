@@ -1,4 +1,4 @@
-# BlackServ ZeroTier TV — 1.1.1 preview
+# BlackServ ZeroTier TV — 1.1.2 preview
 
 Native Android TV client based on [ZerotierFix](https://github.com/kaaass/ZerotierFix), with the ZeroTier JNI core and Android `VpnService`. Package `uk.blackserv.zerotiertv` is separate from the original `com.zerotier.one`.
 
@@ -7,6 +7,7 @@ Native Android TV client based on [ZerotierFix](https://github.com/kaaass/Zeroti
 ## Included
 
 - Two remote-focusable gateway cards, connection/disconnection, one settings menu.
+- Dedicated 320×180 Android TV launcher banner plus a separate square system icon, so launchers do not stretch one asset into both shapes.
 - Profiles for #5 and #9 populated from a fresh read-only BlackServ audit; network ID, next hop and expected public IPv4 remain editable.
 - Foreground VPN service, opt-in boot restoration, tunnel health checks and early TUN closure on shutdown. Connection status requires a successful expected-public-IP check, not just a button click.
 - All apps use VPN by default; exclusions require manual selection under `Aplikacje bez VPN`.
@@ -15,7 +16,7 @@ Native Android TV client based on [ZerotierFix](https://github.com/kaaass/Zeroti
 
 ## Source and reproducible build
 
-`app/src/...` contains selected standalone model snapshots, not a complete Android project. The complete source is reconstructed using **all six ordered patches** against ZerotierFix `0373a58c03ffe053e92212a6fa2d98245db8aa9c`. The pinned native submodule is `d028a24795e4348615783f8f8b95207035595f56`.
+`app/src/...` contains selected standalone model snapshots, not a complete Android project. The complete source is reconstructed using **all seven ordered patches** against ZerotierFix `0373a58c03ffe053e92212a6fa2d98245db8aa9c`. The pinned native submodule is `d028a24795e4348615783f8f8b95207035595f56`.
 
 Windows:
 

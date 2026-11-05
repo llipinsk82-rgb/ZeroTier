@@ -1,4 +1,4 @@
-# BlackServ ZeroTier TV — 1.1.2 preview
+# BlackServ ZeroTier TV — 1.1.5 preview
 
 Native Android TV client based on [ZerotierFix](https://github.com/kaaass/ZerotierFix), with the ZeroTier JNI core and Android `VpnService`. Package `uk.blackserv.zerotiertv` is separate from the original `com.zerotier.one`.
 
@@ -16,7 +16,7 @@ Native Android TV client based on [ZerotierFix](https://github.com/kaaass/Zeroti
 
 ## Source and reproducible build
 
-`app/src/...` contains selected standalone model snapshots, not a complete Android project. The complete source is reconstructed using **all seven ordered patches** against ZerotierFix `0373a58c03ffe053e92212a6fa2d98245db8aa9c`. The pinned native submodule is `d028a24795e4348615783f8f8b95207035595f56`.
+`app/src/...` contains selected standalone model snapshots, not a complete Android project. The complete source is reconstructed using **all eight ordered patches** against ZerotierFix `0373a58c03ffe053e92212a6fa2d98245db8aa9c`. The pinned native submodule is `d028a24795e4348615783f8f8b95207035595f56`.
 
 Windows:
 
@@ -62,6 +62,8 @@ Output: `app/build/outputs/apk/debug/app-debug.apk`. API 23 minimum, target 33; 
 - Boot restoration depends on retained VPN consent and Android/OEM background-start rules. Force-stopping the app suppresses normal boot handling until reopened.
 - DNS diagnostics report observed resolvers and inconclusive results honestly; they do not certify another app's private DoH traffic. Resolver country alone is not proof of a leak. Diagnostics contact ipify, ipwho.is, Cloudflare and bash.ws and expose the normal public request metadata to those services.
 - JSON export needs an installed Android document provider. Settings import excludes ZeroTier identity and requires authorization on a new device.
-- AT4K focus/launcher behavior and all live VPN, route, throughput and reboot checks remain unverified. Stable release signing/update strategy is still required.
+- TCL acceptance on 2026-11-05 passed for tuner #5: node `38c76e1aae`, ZeroTier address `192.168.18.246`, bidirectional reachability, DNS, full-tunnel public IPv4 `91.227.216.230` and Polish geolocation. The underlying `192.168.1.0/24` LAN remains outside the VPN, preserving ADB access.
+- Tuner #9 is authorized with `192.168.100.248`, but live exit-IP acceptance still requires an approved TV switching window. Tuner #23 uses an external controller and cannot be authorized from the tuner itself; controller access is required.
+- Throughput, reboot restoration, disconnect fault recovery and prolonged background playback remain unverified. Stable release signing/update strategy is still required.
 
 Retain ZerotierFix's GPL-2.0 notices and the native ZeroTier core's own license, copyright and distribution terms; the native core is not covered merely by describing the Android wrapper as GPL.

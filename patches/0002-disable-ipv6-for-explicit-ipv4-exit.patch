@@ -1,0 +1,94 @@
+From 61539befe0d2a77b57fe5622202cec0f1c8e85e3 Mon Sep 17 00:00:00 2001
+From: BlackServ CTO <blackserv-cto@users.noreply.github.com>
+Date: Wed, 4 Nov 2026 00:35:49 +0000
+Subject: [PATCH] fix(tv): block IPv6 family for explicit IPv4 tuner exits
+
+---
+ README-BLACKSERV-TV.md                            |  4 ++--
+ .../zerotierfix/service/ZeroTierOneService.java   |  3 +++
+ .../kaaass/zerotierfix/ui/tv/TvRoutePolicy.java   | 14 ++++++++++++++
+ .../zerotierfix/ui/tv/TvRoutePolicyTest.java      | 15 +++++++++++++++
+ 4 files changed, 34 insertions(+), 2 deletions(-)
+ create mode 100644 app/src/main/java/net/kaaass/zerotierfix/ui/tv/TvRoutePolicy.java
+ create mode 100644 app/src/test/java/net/kaaass/zerotierfix/ui/tv/TvRoutePolicyTest.java
+
+diff --git a/README-BLACKSERV-TV.md b/README-BLACKSERV-TV.md
+index 36fd070..cbb3d8e 100644
+--- a/README-BLACKSERV-TV.md
++++ b/README-BLACKSERV-TV.md
+@@ -31,8 +31,8 @@ client, pinned upstream to commit `0373a58c03ffe053e92212a6fa2d98245db8aa9c`.
+ 
+ ## Development status (2026-11-04)
+ 
+-- Pure Java JUnit 4 tests: 32 passing.
+-- Java syntax parse: 85 source files, zero parse errors.
++- Pure Java JUnit 4 tests: 34 passing.
++- Java syntax parse: 86 source files, zero parse errors.
+ - Android Manifest and modified resource XML: structurally valid.
+ - Full Gradle compile, APK install, TV smoke and network egress:
+   **NOT YET TESTED**.
+diff --git a/app/src/main/java/net/kaaass/zerotierfix/service/ZeroTierOneService.java b/app/src/main/java/net/kaaass/zerotierfix/service/ZeroTierOneService.java
+index 93baf54..adb6ac0 100644
+--- a/app/src/main/java/net/kaaass/zerotierfix/service/ZeroTierOneService.java
++++ b/app/src/main/java/net/kaaass/zerotierfix/service/ZeroTierOneService.java
+@@ -58,6 +58,7 @@ import net.kaaass.zerotierfix.ui.NetworkListActivity;
+ import net.kaaass.zerotierfix.ui.tv.TvGatewayProfile;
+ import net.kaaass.zerotierfix.ui.tv.TvGatewaySelection;
+ import net.kaaass.zerotierfix.ui.tv.TvGatewayStore;
++import net.kaaass.zerotierfix.ui.tv.TvRoutePolicy;
+ import net.kaaass.zerotierfix.util.Constants;
+ import net.kaaass.zerotierfix.util.DatabaseUtils;
+ import net.kaaass.zerotierfix.util.InetAddressUtils;
+@@ -840,6 +841,8 @@ public class ZeroTierOneService extends VpnService implements Runnable, EventLis
+         }
+         boolean isRouteViaZeroTier = networkConfig.getRouteViaZeroTier()
+                 || selectedGatewayIp != null;
++        this.disableIPv6 = TvRoutePolicy.disableIpv6(this.disableIPv6,
++                selectedGatewayIp != null);
+ 
+         // 遍历 ZT 网络中当前设备的 IP 地址，组播配置
+         for (var vpnAddress : assignedAddresses) {
+diff --git a/app/src/main/java/net/kaaass/zerotierfix/ui/tv/TvRoutePolicy.java b/app/src/main/java/net/kaaass/zerotierfix/ui/tv/TvRoutePolicy.java
+new file mode 100644
+index 0000000..96f5d00
+--- /dev/null
++++ b/app/src/main/java/net/kaaass/zerotierfix/ui/tv/TvRoutePolicy.java
+@@ -0,0 +1,14 @@
++package net.kaaass.zerotierfix.ui.tv;
++
++/**
++ * A tuner gateway configured only with IPv4 must not permit IPv6 fallthrough.
++ * VpnService.Builder blocks a family without any address, route or DNS for it.
++ */
++public final class TvRoutePolicy {
++    private TvRoutePolicy() {
++    }
++
++    public static boolean disableIpv6(boolean userDisabled, boolean selectedIpv4Gateway) {
++        return userDisabled || selectedIpv4Gateway;
++    }
++}
+diff --git a/app/src/test/java/net/kaaass/zerotierfix/ui/tv/TvRoutePolicyTest.java b/app/src/test/java/net/kaaass/zerotierfix/ui/tv/TvRoutePolicyTest.java
+new file mode 100644
+index 0000000..88f542e
+--- /dev/null
++++ b/app/src/test/java/net/kaaass/zerotierfix/ui/tv/TvRoutePolicyTest.java
+@@ -0,0 +1,15 @@
++package net.kaaass.zerotierfix.ui.tv;
++
++import org.junit.Test;
++import static org.junit.Assert.*;
++
++public class TvRoutePolicyTest {
++    @Test public void explicitIpv4GatewayMustDisableIpv6() {
++        assertTrue(TvRoutePolicy.disableIpv6(false, true));
++    }
++
++    @Test public void preservesExistingUserPreferenceWithoutGatewayOverride() {
++        assertFalse(TvRoutePolicy.disableIpv6(false, false));
++        assertTrue(TvRoutePolicy.disableIpv6(true, false));
++    }
++}
+-- 
+2.56.0.windows.3
+

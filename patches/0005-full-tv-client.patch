@@ -1,0 +1,1213 @@
+diff --git a/app/build.gradle b/app/build.gradle
+index d4faabd..80e8a90 100644
+--- a/app/build.gradle
++++ b/app/build.gradle
+@@ -13,10 +13,10 @@ android {
+ 
+     defaultConfig {
+         applicationId "uk.blackserv.zerotiertv"
+-        minSdkVersion rootProject.ext.minSdkVersion
++        minSdkVersion 23
+         targetSdkVersion rootProject.ext.targetSdkVersion
+-        versionCode 14
+-        versionName "1.0.10"
++        versionCode 15
++        versionName "1.1.0-tv-preview"
+         multiDexEnabled true
+ 
+         testInstrumentationRunner 'androidx.test.runner.AndroidJUnitRunner'
+@@ -58,6 +58,7 @@ dependencies {
+     implementation 'commons-io:commons-io:2.11.0'
+     coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs_nio:2.0.4'
+     testImplementation 'junit:junit:4.13.2'
++    testImplementation 'org.json:json:20231013'
+     androidTestImplementation 'androidx.test.ext:junit:1.1.5'
+     androidTestImplementation 'androidx.test.espresso:espresso-core:3.5.1'
+     implementation 'org.greenrobot:greendao:3.3.0'
+diff --git a/app/src/main/AndroidManifest.xml b/app/src/main/AndroidManifest.xml
+index a36ccc1..c525e43 100644
+--- a/app/src/main/AndroidManifest.xml
++++ b/app/src/main/AndroidManifest.xml
+@@ -2,6 +2,9 @@
+ <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+ 
+     <uses-permission android:name="android.permission.INTERNET" />
++    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
++    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
++    <uses-feature android:name="android.hardware.touchscreen" android:required="false" />
+     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+     <uses-permission android:name="android.permission.WAKE_LOCK" />
+@@ -20,11 +23,11 @@
+ 
+     <application
+         android:name="net.kaaass.zerotierfix.ZerotierFixApplication"
+-        android:allowBackup="true"
++        android:allowBackup="false"
+         android:appComponentFactory="androidx.core.app.CoreComponentFactory"
+-        android:icon="@mipmap/ic_launcher"
++        android:icon="@drawable/tv_banner"
+         android:label="@string/app_name"
+-        android:roundIcon="@mipmap/ic_launcher_round"
++        android:roundIcon="@drawable/tv_banner"
+         android:supportsRtl="true"
+         android:theme="@style/Theme.ZerotierFix"
+         android:usesCleartextTraffic="true">
+@@ -47,8 +50,11 @@
+             <intent-filter>
+                 <action android:name="android.intent.action.MAIN" />
+                 <category android:name="android.intent.category.LEANBACK_LAUNCHER" />
++                <category android:name="android.intent.category.LAUNCHER" />
+             </intent-filter>
+         </activity>
++        <activity android:name=".ui.tv.TvDiagnosticsActivity" android:exported="false"
++            android:theme="@style/Theme.ZerotierFix.NoActionBar" />
+         <activity
+             android:name=".ui.tv.TvBypassActivity"
+             android:exported="false"
+@@ -56,13 +62,7 @@
+         <activity
+             android:name=".ui.NetworkListActivity"
+             android:label="@string/app_name"
+-            android:exported="true">
+-            <intent-filter>
+-                <action android:name="android.intent.action.MAIN" />
+-
+-                <category android:name="android.intent.category.LAUNCHER" />
+-            </intent-filter>
+-        </activity>
++            android:exported="false" />
+         <activity
+             android:name=".ui.JoinNetworkActivity"
+             android:label="@string/join_network" />
+diff --git a/app/src/main/java/net/kaaass/zerotierfix/service/StartupReceiver.java b/app/src/main/java/net/kaaass/zerotierfix/service/StartupReceiver.java
+index 798686b..5e00b7a 100644
+--- a/app/src/main/java/net/kaaass/zerotierfix/service/StartupReceiver.java
++++ b/app/src/main/java/net/kaaass/zerotierfix/service/StartupReceiver.java
+@@ -3,22 +3,31 @@ package net.kaaass.zerotierfix.service;
+ import android.content.BroadcastReceiver;
+ import android.content.Context;
+ import android.content.Intent;
++import android.net.VpnService;
+ import android.preference.PreferenceManager;
+-import android.util.Log;
++import androidx.core.content.ContextCompat;
++import net.kaaass.zerotierfix.ui.tv.TvGatewayStore;
++import net.kaaass.zerotierfix.ui.tv.TvNetworkSettings;
+ 
+-import net.kaaass.zerotierfix.util.Constants;
+-
+-// TODO: clear up
++/** Boot restores only a previously selected profile and previously granted VPN consent. */
+ public class StartupReceiver extends BroadcastReceiver {
+-    private static final String TAG = "StartupReceiver";
+-
+-    public void onReceive(Context context, Intent intent) {
+-        Log.i(TAG, "Received: " + intent.getAction() + ". Starting ZeroTier One service.");
+-        var pref = PreferenceManager.getDefaultSharedPreferences(context);
+-        if (pref.getBoolean(Constants.PREF_GENERAL_START_ZEROTIER_ON_BOOT, true)) {
+-            Log.i(TAG, "Preferences set to start ZeroTier on boot");
+-        } else {
+-            Log.i(TAG, "Preferences set to not start ZeroTier on boot");
++    @Override public void onReceive(Context context, Intent intent) {
++        if (!Intent.ACTION_BOOT_COMPLETED.equals(intent.getAction())) return;
++        if (!PreferenceManager.getDefaultSharedPreferences(context).getBoolean(TvNetworkSettings.BOOT, false)
++                || VpnService.prepare(context) != null) return;
++        try {
++            String active = TvGatewayStore.getActiveTunerId(context);
++            for (var profile : TvGatewayStore.load(context)) {
++                if (!profile.getTunerId().equals(active)) continue;
++                Intent start = new Intent(context, ZeroTierOneService.class);
++                start.putExtra(ZeroTierOneService.ZT1_NETWORK_ID, profile.getNetworkId());
++                ContextCompat.startForegroundService(context, start);
++                return;
++            }
++        } catch (RuntimeException restricted) {
++            // OEM background restrictions must not crash the receiver or fake a connection.
++            PreferenceManager.getDefaultSharedPreferences(context).edit()
++                    .putString("blackserv_tv_last_error", "Autostart niedostępny. Połącz z ekranu aplikacji.").apply();
+         }
+     }
+ }
+diff --git a/app/src/main/java/net/kaaass/zerotierfix/service/VpnBypassConfig.java b/app/src/main/java/net/kaaass/zerotierfix/service/VpnBypassConfig.java
+index 8c6b9f0..c06b76a 100644
+--- a/app/src/main/java/net/kaaass/zerotierfix/service/VpnBypassConfig.java
++++ b/app/src/main/java/net/kaaass/zerotierfix/service/VpnBypassConfig.java
+@@ -16,7 +16,7 @@ import java.util.regex.Pattern;
+ public final class VpnBypassConfig {
+     public static final String PREF_KEY = "blackserv_vpn_bypass_packages";
+     private static final String DEFAULT_PACKAGES =
+-            "com.android.vending";
++            "";
+     private static final Pattern PACKAGE_NAME = Pattern.compile(
+             "[A-Za-z_][A-Za-z_0-9]*(\\.[A-Za-z_][A-Za-z_0-9]*)+");
+ 
+diff --git a/app/src/main/java/net/kaaass/zerotierfix/service/ZeroTierOneService.java b/app/src/main/java/net/kaaass/zerotierfix/service/ZeroTierOneService.java
+index adb6ac0..35acece 100644
+--- a/app/src/main/java/net/kaaass/zerotierfix/service/ZeroTierOneService.java
++++ b/app/src/main/java/net/kaaass/zerotierfix/service/ZeroTierOneService.java
+@@ -99,6 +99,55 @@ public class ZeroTierOneService extends VpnService implements Runnable, EventLis
+     FileOutputStream out;
+     DatagramSocket svrSocket;
+     ParcelFileDescriptor vpnSocket;
++    private final android.os.Handler healthHandler = new android.os.Handler(android.os.Looper.getMainLooper());
++    private final java.util.concurrent.ExecutorService healthWorker = java.util.concurrent.Executors.newSingleThreadExecutor();
++    private volatile boolean stopping;
++    private int healthFailures;
++    private long healthGeneration;
++    private final Runnable healthCheck = new Runnable() {
++        @Override public void run() {
++            if (stopping) return;
++            final long generation = healthGeneration;
++            healthWorker.execute(() -> {
++                String failure = null;
++                try {
++                    if (vpnSocket == null) throw new java.io.IOException("Brak adresu lub autoryzacji ZeroTier");
++                    String ip = net.kaaass.zerotierfix.ui.tv.TvExitProbe.fetchPublicIpv4();
++                    if (!org.apache.commons.validator.routines.InetAddressValidator.getInstance().isValidInet4Address(ip))
++                        throw new java.io.IOException("Nieprawidłowa odpowiedź testu internetu");
++                    for (TvGatewayProfile p : TvGatewayStore.load(ZeroTierOneService.this)) {
++                        if (p.getTunerId().equals(TvGatewayStore.getActiveTunerId(ZeroTierOneService.this))
++                                && p.getExpectedPublicIpv4() != null && !ip.equals(p.getExpectedPublicIpv4()))
++                            throw new java.io.IOException("Publiczny IP nie odpowiada wybranej bramie");
++                    }
++                } catch (Exception error) { failure = error.getMessage(); }
++                final String problem = failure;
++                healthHandler.post(() -> {
++                    if (stopping || generation != healthGeneration) return;
++                    healthFailures = problem == null ? 0 : healthFailures + 1;
++                    if (healthFailures >= 3) {
++                        PreferenceManager.getDefaultSharedPreferences(ZeroTierOneService.this).edit()
++                            .putString("blackserv_tv_last_error", problem + ". Zatrzymywanie VPN.").apply();
++                        eventBus.post(new VPNErrorEvent(problem));
++                        stopSelf();
++                    } else healthHandler.postDelayed(healthCheck, 20000);
++                });
++            });
++        }
++    };
++
++    private void foregroundStarting() {
++        notificationManager = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
++        if (Build.VERSION.SDK_INT >= 26) notificationManager.createNotificationChannel(
++            new NotificationChannel(Constants.CHANNEL_ID, "BlackServ VPN", NotificationManager.IMPORTANCE_LOW));
++        Intent open = new Intent(this, net.kaaass.zerotierfix.ui.tv.TvHomeActivity.class);
++        int flags = PendingIntent.FLAG_UPDATE_CURRENT;
++        if (Build.VERSION.SDK_INT >= 23) flags |= PendingIntent.FLAG_IMMUTABLE;
++        startForeground(ZT_NOTIFICATION_TAG, new NotificationCompat.Builder(this, Constants.CHANNEL_ID)
++            .setSmallIcon(R.drawable.tv_banner).setContentTitle("BlackServ VPN")
++            .setContentText("Łączenie z ZeroTier…").setOngoing(true)
++            .setContentIntent(PendingIntent.getActivity(this, 0, open, flags)).build());
++    }
+     private int bindCount = 0;
+     private boolean disableIPv6 = false;
+     private int mStartID = -1;
+@@ -269,14 +318,14 @@ public class ZeroTierOneService extends VpnService implements Runnable, EventLis
+     public int onStartCommand(Intent intent, int flags, int startId) {
+         long networkId;
+         Log.d(TAG, "onStartCommand");
+-        if (startId == 3) {
+-            Log.i(TAG, "Authorizing VPN");
+-            return START_NOT_STICKY;
+-        } else if (intent == null) {
+-            Log.e(TAG, "NULL intent.  Cannot start");
+-            return START_NOT_STICKY;
+-        }
+         this.mStartID = startId;
++        foregroundStarting();
++        if (intent == null) intent = new Intent();
++        stopping = false;
++        healthFailures = 0;
++        healthGeneration++;
++        healthHandler.removeCallbacks(healthCheck);
++        healthHandler.postDelayed(healthCheck, 20000);
+ 
+         // 注册事件总线监听器
+         if (!this.eventBus.isRegistered(this)) {
+@@ -288,29 +337,14 @@ public class ZeroTierOneService extends VpnService implements Runnable, EventLis
+             // Intent 中指定了目标网络，直接使用此 ID
+             networkId = intent.getLongExtra(ZT1_NETWORK_ID, 0);
+         } else {
+-            // 默认启用最近一次启动的网络
+-            DatabaseUtils.readLock.lock();
++            networkId = 0;
++            String activeId = TvGatewayStore.getActiveTunerId(this);
+             try {
+-                var daoSession = ((ZerotierFixApplication) getApplication()).getDaoSession();
+-                daoSession.clear();
+-                var lastActivatedNetworks = daoSession.getNetworkDao().queryBuilder()
+-                        .where(NetworkDao.Properties.LastActivated.eq(true))
+-                        .list();
+-                if (lastActivatedNetworks == null || lastActivatedNetworks.isEmpty()) {
+-                    Log.e(TAG, "Couldn't find last activated connection");
+-                    return START_NOT_STICKY;
+-                } else if (lastActivatedNetworks.size() > 1) {
+-                    Log.e(TAG, "Multiple networks marked as last connected: " + lastActivatedNetworks.size());
+-                    for (Network network : lastActivatedNetworks) {
+-                        Log.e(TAG, "ID: " + Long.toHexString(network.getNetworkId()));
+-                    }
+-                    throw new IllegalStateException("Database is inconsistent");
+-                } else {
+-                    networkId = lastActivatedNetworks.get(0).getNetworkId();
+-                    Log.i(TAG, "Got Always On request for ZeroTier");
++                for (TvGatewayProfile p : TvGatewayStore.load(this)) {
++                    if (p.getTunerId().equals(activeId)) { networkId = p.getNetworkId(); break; }
+                 }
+-            } finally {
+-                DatabaseUtils.readLock.unlock();
++            } catch (IllegalArgumentException invalid) {
++                this.eventBus.post(new VPNErrorEvent("Nieprawidłowy profil autostartu"));
+             }
+         }
+         if (networkId == 0) {
+@@ -329,8 +363,8 @@ public class ZeroTierOneService extends VpnService implements Runnable, EventLis
+         if (currentNetworkInfo == NetworkInfoUtils.CurrentConnection.CONNECTION_NONE) {
+             // 未连接网络
+             Toast.makeText(this, R.string.toast_no_network, Toast.LENGTH_SHORT).show();
+-            stopSelf(this.mStartID);
+-            return START_NOT_STICKY;
++            // The native engine retries while Wi-Fi comes up after boot.
++            // The bounded health monitor releases the VPN if connectivity never recovers.
+         } else if (currentNetworkInfo == NetworkInfoUtils.CurrentConnection.CONNECTION_MOBILE &&
+                 !useCellularData) {
+             // 使用移动网络，但未在设置中允许移动网络访问
+@@ -350,7 +384,7 @@ public class ZeroTierOneService extends VpnService implements Runnable, EventLis
+                     this.svrSocket.bind(new InetSocketAddress(9994));
+                 }
+                 if (!protect(this.svrSocket)) {
+-                    Log.e(TAG, "Error protecting UDP socket from feedback loop.");
++                    throw new java.io.IOException("Cannot protect ZeroTier UDP socket");
+                 }
+ 
+                 // 创建本地节点
+@@ -367,6 +401,7 @@ public class ZeroTierOneService extends VpnService implements Runnable, EventLis
+                         Log.d(TAG, "ZeroTierOne Node Initialized");
+                     } else {
+                         Log.e(TAG, "Error starting ZT1 Node: " + result);
++                        stopSelf(startId);
+                         return START_NOT_STICKY;
+                     }
+                     this.onNodeStatusRequest(null);
+@@ -417,6 +452,7 @@ public class ZeroTierOneService extends VpnService implements Runnable, EventLis
+                 }
+             } catch (Exception e) {
+                 Log.e(TAG, e.toString(), e);
++                stopSelf(startId);
+                 return START_NOT_STICKY;
+             }
+         }
+@@ -425,6 +461,19 @@ public class ZeroTierOneService extends VpnService implements Runnable, EventLis
+     }
+ 
+     public void stopZeroTier() {
++        if (android.os.Looper.myLooper() != android.os.Looper.getMainLooper()) {
++            healthHandler.post(this::stopSelf);
++            return;
++        }
++        stopping = true;
++        healthGeneration++;
++        healthHandler.removeCallbacks(healthCheck);
++        // Release the OS route before joining native/IO threads, including error paths.
++        if (vpnSocket != null) {
++            try { vpnSocket.close(); } catch (java.io.IOException ignored) { }
++            vpnSocket = null;
++        }
++        stopForeground(true);
+         if (this.svrSocket != null) {
+             this.svrSocket.close();
+             this.svrSocket = null;
+@@ -511,11 +560,14 @@ public class ZeroTierOneService extends VpnService implements Runnable, EventLis
+         } catch (Exception e) {
+             Log.e(TAG, e.toString(), e);
+         } finally {
++            healthWorker.shutdownNow();
+             super.onDestroy();
+         }
+     }
+ 
+     public void onRevoke() {
++        PreferenceManager.getDefaultSharedPreferences(this).edit()
++            .putString("blackserv_tv_last_error", "Zgoda VPN cofnięta lub uruchomiono inny VPN.").apply();
+         stopZeroTier();
+         if (this.vpnSocket != null) {
+             try {
+@@ -574,7 +626,7 @@ public class ZeroTierOneService extends VpnService implements Runnable, EventLis
+ 
+     @Subscribe(threadMode = ThreadMode.POSTING)
+     public void onIsServiceRunningRequest(IsServiceRunningRequestEvent event) {
+-        this.eventBus.post(new IsServiceRunningReplyEvent(true));
++        this.eventBus.post(new IsServiceRunningReplyEvent(!stopping && node != null));
+     }
+ 
+     /**
+@@ -702,7 +754,7 @@ public class ZeroTierOneService extends VpnService implements Runnable, EventLis
+     public void onEvent(Event event) {
+         Log.d(TAG, "Event: " + event.toString());
+         // 更新节点状态
+-        if (this.node.isInited()) {
++        if (this.node != null && this.node.isInited()) {
+             this.eventBus.post(new NodeStatusEvent(this.node.status(), this.node.getVersion()));
+         }
+     }
+@@ -937,7 +989,21 @@ public class ZeroTierOneService extends VpnService implements Runnable, EventLis
+         if (Build.VERSION.SDK_INT >= 29) {
+             builder.setMetered(false);
+         }
+-        addDNSServers(builder, network);
++        if (selectedGatewayIp != null) {
++            boolean hasIpv4Dns = false;
++            for (String dns : net.kaaass.zerotierfix.ui.tv.TvNetworkSettings.parseDns(
++                    net.kaaass.zerotierfix.ui.tv.TvNetworkSettings.dns(this))) {
++                InetAddress address;
++                try { address = InetAddress.getByName(dns); }
++                catch (java.net.UnknownHostException badDns) { return false; }
++                if (address instanceof Inet4Address) { builder.addDnsServer(address); hasIpv4Dns = true; }
++                else if (!disableIPv6) builder.addDnsServer(address);
++            }
++            if (!hasIpv4Dns && disableIPv6) {
++                eventBus.post(new VPNErrorEvent("Brama IPv4 wymaga DNS IPv4"));
++                return false;
++            }
++        } else addDNSServers(builder, network);
+ 
+         // 配置 MTU
+         int mtu = virtualNetworkConfig.getMtu();
+@@ -955,6 +1021,7 @@ public class ZeroTierOneService extends VpnService implements Runnable, EventLis
+             String storedExclusions = PreferenceManager.getDefaultSharedPreferences(this)
+                     .getString(VpnBypassConfig.PREF_KEY, null);
+             for (String app : VpnBypassConfig.parse(storedExclusions)) {
++                if (app.equals(getPackageName())) continue;
+                 try {
+                     builder.addDisallowedApplication(app);
+                 } catch (Exception exception) {
+@@ -993,7 +1060,7 @@ public class ZeroTierOneService extends VpnService implements Runnable, EventLis
+         }
+         var pendingIntent =
+                 PendingIntent.getActivity(this, 0,
+-                        new Intent(this, NetworkListActivity.class)
++                        new Intent(this, net.kaaass.zerotierfix.ui.tv.TvHomeActivity.class)
+                                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP
+                                         | Intent.FLAG_ACTIVITY_CLEAR_TOP)
+                         , pendingIntentFlag);
+@@ -1001,7 +1068,7 @@ public class ZeroTierOneService extends VpnService implements Runnable, EventLis
+                 .setPriority(1)
+                 .setOngoing(true)
+                 .setSmallIcon(R.mipmap.ic_launcher)
+-                .setContentTitle(getString(R.string.notification_title_connected))
++                .setContentTitle("BlackServ VPN — sieć ZeroTier aktywna")
+                 .setContentText(getString(R.string.notification_text_connected, network.getNetworkIdStr()))
+                 .setColor(ContextCompat.getColor(getApplicationContext(), R.color.zerotier_orange))
+                 .setContentIntent(pendingIntent).build();
+diff --git a/app/src/main/java/net/kaaass/zerotierfix/ui/tv/TvBackup.java b/app/src/main/java/net/kaaass/zerotierfix/ui/tv/TvBackup.java
+new file mode 100644
+index 0000000..5e60e30
+--- /dev/null
++++ b/app/src/main/java/net/kaaass/zerotierfix/ui/tv/TvBackup.java
+@@ -0,0 +1,78 @@
++package net.kaaass.zerotierfix.ui.tv;
++
++import android.content.Context;
++import android.preference.PreferenceManager;
++import net.kaaass.zerotierfix.service.VpnBypassConfig;
++import org.json.JSONArray;
++import org.json.JSONException;
++import org.json.JSONObject;
++import java.util.ArrayList;
++import java.util.List;
++
++/** Local settings only. Deliberately excludes identity.secret, tokens, active sessions and network grants. */
++public final class TvBackup {
++    public static final int MAX_BYTES = 256 * 1024;
++    public static final class Settings {
++        public final List<TvGatewayProfile> profiles;
++        public final String dns, exclusions;
++        public final boolean boot;
++        Settings(List<TvGatewayProfile> p, String d, String e, boolean b) {
++            profiles = p; dns = d; exclusions = e; boot = b;
++        }
++    }
++    private TvBackup() { }
++    public static Settings decode(String text) throws JSONException {
++        if (text.length() > MAX_BYTES) throw new IllegalArgumentException("Plik jest zbyt duży");
++        JSONObject json = new JSONObject(text);
++        if (!"blackserv-zerotier-tv".equals(json.getString("format")) || json.getInt("version") != 1)
++            throw new IllegalArgumentException("Nieobsługiwany format backupu");
++        JSONArray data = json.getJSONArray("profiles");
++        if (data.length() > 100) throw new IllegalArgumentException("Zbyt wiele profili");
++        List<TvGatewayProfile> profiles = new ArrayList<>();
++        for (int i=0; i<data.length(); i++) {
++            JSONObject p = data.getJSONObject(i);
++            profiles.add(new TvGatewayProfile(p.getString("id"), p.getString("name"),
++                p.getString("networkId"), p.getString("gatewayIpv4"), p.optString("expectedPublicIpv4", "")));
++        }
++        TvGatewayCodec.encode(profiles); // validate duplicate IDs before any mutation
++        String dns = json.getString("dns");
++        TvNetworkSettings.parseDns(dns);
++        JSONArray packages = json.getJSONArray("excludedPackages");
++        List<String> exclusions = new ArrayList<>();
++        for (int i=0; i<packages.length(); i++) {
++            String pkg = packages.getString(i);
++            if (pkg.equals("uk.blackserv.zerotiertv") || VpnBypassConfig.parse(pkg).size() != 1 || !VpnBypassConfig.parse(pkg).get(0).equals(pkg))
++                throw new IllegalArgumentException("Nieprawidłowy pakiet aplikacji");
++            exclusions.add(pkg);
++        }
++        return new Settings(profiles, dns, VpnBypassConfig.serialize(exclusions), json.getBoolean("startOnBoot"));
++    }
++    public static String encode(List<TvGatewayProfile> profiles, String dns, String excluded, boolean boot)
++            throws JSONException {
++        JSONArray list = new JSONArray();
++        for (TvGatewayProfile p : profiles) {
++            JSONObject item = new JSONObject().put("id", p.getTunerId()).put("name", p.getDisplayName())
++                .put("networkId", p.getNetworkIdHex()).put("gatewayIpv4", p.getGatewayIpv4())
++                .put("expectedPublicIpv4", p.getExpectedPublicIpv4() == null ? "" : p.getExpectedPublicIpv4());
++            list.put(item);
++        }
++        return new JSONObject().put("format", "blackserv-zerotier-tv").put("version", 1)
++            .put("profiles", list).put("dns", dns).put("startOnBoot", boot)
++            .put("excludedPackages", new JSONArray(VpnBypassConfig.parse(excluded))).toString(2);
++    }
++    public static String exportSettings(Context c) throws JSONException {
++        var prefs = PreferenceManager.getDefaultSharedPreferences(c);
++        return encode(TvGatewayStore.load(c), TvNetworkSettings.dns(c),
++            prefs.getString(VpnBypassConfig.PREF_KEY, null), prefs.getBoolean(TvNetworkSettings.BOOT, false));
++    }
++    public static void restore(Context c, Settings settings) {
++        for (TvGatewayProfile p : settings.profiles) TvNetworkStore.ensure(c, p);
++        boolean saved = PreferenceManager.getDefaultSharedPreferences(c).edit()
++            .putString(TvGatewayStore.PREF_GATEWAYS, TvGatewayCodec.encode(settings.profiles))
++            .putString(TvNetworkSettings.DNS, settings.dns)
++            .putString(VpnBypassConfig.PREF_KEY, settings.exclusions)
++            .putBoolean(TvNetworkSettings.BOOT, settings.boot)
++            .remove(TvGatewayStore.PREF_ACTIVE_TUNER).commit();
++        if (!saved) throw new IllegalStateException("Nie można zapisać ustawień");
++    }
++}
+diff --git a/app/src/main/java/net/kaaass/zerotierfix/ui/tv/TvBypassActivity.java b/app/src/main/java/net/kaaass/zerotierfix/ui/tv/TvBypassActivity.java
+index c11a1b0..438f924 100644
+--- a/app/src/main/java/net/kaaass/zerotierfix/ui/tv/TvBypassActivity.java
++++ b/app/src/main/java/net/kaaass/zerotierfix/ui/tv/TvBypassActivity.java
+@@ -44,7 +44,7 @@ public final class TvBypassActivity extends AppCompatActivity {
+         root.setPadding(dp(48), dp(40), dp(48), dp(48));
+         scroller.addView(root);
+ 
+-        TextView heading = label("Aplikacje poza VPN", 30);
++        TextView heading = label("Aplikacje bez VPN", 30);
+         root.addView(heading);
+         TextView hint = label("Zaznaczone aplikacje korzystają z normalnego internetu. "
+                 + "Zmiany wymagają ponownego połączenia VPN.", 18);
+@@ -82,6 +82,11 @@ public final class TvBypassActivity extends AppCompatActivity {
+                         info.loadLabel(pm).toString());
+             }
+         }
++        Intent launcherApps = new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER);
++        for (ResolveInfo info : pm.queryIntentActivities(launcherApps, 0)) {
++            if (info.activityInfo != null) visiblePackages.put(info.activityInfo.packageName, info.loadLabel(pm).toString());
++        }
++        visiblePackages.remove(getPackageName()); // VPN health probes must follow this app's tunnel.
+         for (String pkg : excludedPackages) {
+             if (!visiblePackages.containsKey(pkg)) {
+                 visiblePackages.put(pkg, pkg);
+@@ -91,6 +96,7 @@ public final class TvBypassActivity extends AppCompatActivity {
+     }
+ 
+     private void render() {
++        Object focusedTag = getCurrentFocus() == null ? null : getCurrentFocus().getTag();
+         list.removeAllViews();
+         for (Map.Entry<String, String> app : visiblePackages.entrySet()) {
+             String pkg = app.getKey();
+@@ -99,6 +105,7 @@ public final class TvBypassActivity extends AppCompatActivity {
+                     + app.getValue() + "\n" + pkg, 20);
+             row.setPadding(dp(18), dp(16), dp(18), dp(16));
+             row.setTextColor(color(isExcluded ? R.color.tv_focus : R.color.tv_text));
++            row.setTag(pkg);
+             row.setFocusable(true);
+             row.setClickable(true);
+             row.setBackground(background(false));
+@@ -116,6 +123,7 @@ public final class TvBypassActivity extends AppCompatActivity {
+                     LinearLayout.LayoutParams.WRAP_CONTENT);
+             margin.topMargin = dp(10);
+             list.addView(row, margin);
++            if (pkg.equals(focusedTag)) row.requestFocus();
+         }
+     }
+ 
+@@ -133,6 +141,10 @@ public final class TvBypassActivity extends AppCompatActivity {
+                         Toast.makeText(this, "Niepoprawna nazwa pakietu", Toast.LENGTH_LONG).show();
+                         return;
+                     }
++                    if (pkg.equals(getPackageName())) {
++                        Toast.makeText(this, "Klient VPN musi pozostać w tunelu dla diagnostyki", Toast.LENGTH_LONG).show();
++                        return;
++                    }
+                     excludedPackages.add(pkg);
+                     visiblePackages.put(pkg, pkg);
+                     save();
+diff --git a/app/src/main/java/net/kaaass/zerotierfix/ui/tv/TvDiagnosticsActivity.java b/app/src/main/java/net/kaaass/zerotierfix/ui/tv/TvDiagnosticsActivity.java
+new file mode 100644
+index 0000000..f41e834
+--- /dev/null
++++ b/app/src/main/java/net/kaaass/zerotierfix/ui/tv/TvDiagnosticsActivity.java
+@@ -0,0 +1,187 @@
++package net.kaaass.zerotierfix.ui.tv;
++
++import android.os.Bundle;
++import android.net.ConnectivityManager;
++import android.net.NetworkCapabilities;
++import android.widget.*;
++import android.view.View;
++import android.graphics.drawable.GradientDrawable;
++import androidx.appcompat.app.AppCompatActivity;
++import net.kaaass.zerotierfix.R;
++import java.io.*;
++import java.net.*;
++import java.nio.charset.StandardCharsets;
++import java.util.Locale;
++import java.util.concurrent.*;
++import javax.net.ssl.HttpsURLConnection;
++import org.json.JSONObject;
++
++/** Real, bounded measurements. No generated metrics and no DNS-leak PASS without resolver evidence. */
++public final class TvDiagnosticsActivity extends AppCompatActivity {
++    private final ExecutorService worker = Executors.newSingleThreadExecutor();
++    private TextView result;
++    private boolean busy;
++    private volatile boolean cancelled;
++    private volatile HttpsURLConnection connection;
++    @Override public void onCreate(Bundle state) {
++        super.onCreate(state);
++        ScrollView scroll = new ScrollView(this);
++        scroll.setBackgroundColor(getColor(R.color.tv_canvas));
++        LinearLayout root = new LinearLayout(this); root.setOrientation(LinearLayout.VERTICAL);
++        root.setPadding(48,32,48,32); scroll.addView(root);
++        TextView title = new TextView(this); title.setText("Diagnostyka połączenia"); title.setTextSize(30);
++        title.setTextColor(getColor(R.color.tv_text)); root.addView(title);
++        add(root, "Publiczny IP i geolokalizacja", () -> run(this::publicIp));
++        add(root, "Prędkość ↓ / ↑ (do 12 MB danych)", () -> run(this::speed));
++        add(root, "Test DNS leak (bash.ws)", () -> run(this::dns));
++        add(root, "Status VPN i trasy", () -> run(this::routes));
++        add(root, "Wstecz", this::finish);
++        result = new TextView(this); result.setTextSize(18); result.setTextColor(getColor(R.color.tv_text));
++        result.setPadding(12,24,12,24); result.setText("Wybierz test. Wyniki dotyczą bieżącego połączenia tego urządzenia.");
++        result.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);
++        root.addView(result); setContentView(scroll);
++    }
++    private void add(LinearLayout root, String text, Runnable task) {
++        Button button = new Button(this); button.setText(text); button.setTextSize(19);
++        button.setAllCaps(false); button.setOnClickListener(v -> task.run()); root.addView(button);
++    }
++    private interface Test { String measure() throws Exception; }
++    private void run(Test test) {
++        if (busy) { result.setText("Test trwa. Wstecz anuluje pomiar."); return; }
++        busy = true; result.setText("Pomiar…");
++        worker.execute(() -> {
++            String text;
++            try { text = test.measure(); } catch (Exception e) { text = "Nie udało się wykonać testu: " + e.getMessage(); }
++            final String output = text;
++            runOnUiThread(() -> { busy = false; if (!isFinishing() && !isDestroyed()) result.setText(output); });
++        });
++    }
++    private HttpsURLConnection open(String url) throws IOException {
++        if (cancelled) throw new IOException("Anulowano");
++        HttpsURLConnection c = (HttpsURLConnection) new URL(url).openConnection();
++        c.setConnectTimeout(8000); c.setReadTimeout(8000); c.setUseCaches(false);
++        c.setInstanceFollowRedirects(false); connection = c; return c;
++    }
++    private String get(String url) throws IOException {
++        HttpsURLConnection c = open(url);
++        try {
++            if (c.getResponseCode() != 200) throw new IOException("HTTP " + c.getResponseCode());
++            ByteArrayOutputStream out = new ByteArrayOutputStream();
++            try (InputStream in = c.getInputStream()) {
++                byte[] buf = new byte[2048]; int n;
++                while ((n = in.read(buf)) != -1) {
++                    if (cancelled || out.size()+n > 65536) throw new IOException("Przerwano odpowiedź");
++                    out.write(buf,0,n);
++                }
++            }
++            return out.toString("UTF-8");
++        } finally { c.disconnect(); connection = null; }
++    }
++    private String publicIp() throws Exception {
++        String ip = TvExitProbe.fetchPublicIpv4();
++        try {
++            JSONObject geo = new JSONObject(get("https://ipwho.is/" + ip));
++            if (!geo.optBoolean("success", false)) throw new IOException("Geolokalizacja niedostępna");
++            return "Publiczny IPv4: " + ip + "\nKraj: " + geo.optString("country") + " (" + geo.optString("country_code")
++                + ")\nMiasto (przybliżone): " + geo.optString("city") + "\nSzer./dł.: "
++                + geo.optString("latitude") + ", " + geo.optString("longitude")
++                + "\nŹródło: ipify / ipwho.is; lokalizacja IP nie jest lokalizacją GPS.";
++        } catch (Exception unavailable) { return "Publiczny IPv4: " + ip + "\nGeolokalizacja niedostępna."; }
++    }
++    private String speed() throws Exception {
++        long bytes = 0; long start = System.nanoTime();
++        HttpsURLConnection down = open("https://speed.cloudflare.com/__down?bytes=10000000");
++        try {
++            if (down.getResponseCode() != 200) throw new IOException("Błąd pobierania");
++            try (InputStream in = down.getInputStream()) {
++                byte[] buffer = new byte[32768]; int n;
++                while ((n=in.read(buffer)) != -1) {
++                    bytes += n;
++                    if (cancelled || bytes > 10000000 || System.nanoTime()-start > 20000000000L) break;
++                }
++            }
++        } finally { down.disconnect(); connection = null; }
++        double download = mbps(bytes, System.nanoTime()-start);
++        HttpsURLConnection up = open("https://speed.cloudflare.com/__up");
++        start = System.nanoTime();
++        try {
++            up.setRequestMethod("POST"); up.setDoOutput(true); up.setFixedLengthStreamingMode(2000000);
++            up.setRequestProperty("Content-Type", "application/octet-stream");
++            byte[] buffer = new byte[16384]; new java.security.SecureRandom().nextBytes(buffer);
++            try (OutputStream out = up.getOutputStream()) {
++                for (int sent=0;sent<2000000;) {
++                    if (cancelled || System.nanoTime()-start > 20000000000L) throw new IOException("Upload przekroczył limit czasu");
++                    int n = Math.min(buffer.length, 2000000-sent); out.write(buffer,0,n); sent+=n;
++                }
++            }
++            int code = up.getResponseCode();
++            if (code < 200 || code >= 300) throw new IOException("Upload HTTP " + code);
++            return String.format(Locale.getDefault(), "Pobieranie: %.2f Mb/s\nWysyłanie: %.2f Mb/s\nPomiar jednego strumienia HTTPS do Cloudflare, z narzutem zestawienia połączenia.",
++                download, mbps(2000000, System.nanoTime()-start));
++        } finally { up.disconnect(); connection=null; }
++    }
++    static double mbps(long bytes, long nanos) { return nanos <= 0 ? 0 : bytes * 8000.0 / nanos; }
++    private String dns() throws Exception {
++        String id = get("https://bash.ws/id").trim();
++        if (!id.matches("[A-Za-z0-9-]{1,64}")) throw new IOException("Niepoprawny identyfikator testu DNS");
++        try { get("https://ipv4.bash.ws/myip/test/" + id); } catch (IOException ignored) { }
++        try { get("https://ipv6.bash.ws/myip/test/" + id); } catch (IOException ignored) { }
++        java.util.concurrent.ExecutorService probes = java.util.concurrent.Executors.newFixedThreadPool(4);
++        try {
++            java.util.List<java.util.concurrent.Callable<Void>> queries = new java.util.ArrayList<>();
++            for (int i=1; i<=8; i++) {
++                final String name = i + "." + id + ".bash.ws";
++                queries.add(() -> { try { InetAddress.getAllByName(name); } catch (UnknownHostException ignored) { } return null; });
++            }
++            probes.invokeAll(queries, 12, TimeUnit.SECONDS);
++        } finally { probes.shutdownNow(); }
++        if (cancelled) throw new IOException("Anulowano");
++        org.json.JSONArray records = new org.json.JSONArray(get("https://bash.ws/dnsleak/test/" + id + "?json=2"));
++        StringBuilder out = new StringBuilder("Resolverzy zaobserwowani przez bash.ws:\n");
++        int found = 0;
++        for (int i=0; i<records.length(); i++) {
++            JSONObject record = records.getJSONObject(i);
++            if ("error".equals(record.optString("type"))) throw new IOException(record.optString("text"));
++            if ("dns".equals(record.optString("type"))) {
++                found++;
++                out.append(record.optString("ip")).append(" · ").append(record.optString("country_name"))
++                    .append(" · ").append(record.optString("asn")).append("\n");
++            }
++        }
++        if (found == 0) return "DNS leak: nierozstrzygnięty — serwer nie zarejestrował resolverów.";
++        out.append("\nPorównaj operatorów z wybranym DNS: ").append(TvNetworkSettings.dns(this));
++        out.append("\nResolver operatora UK podczas VPN może oznaczać wyciek. Kraj publicznego resolvera sam nie dowodzi wycieku. Test dotyczy DNS systemowego tej aplikacji, nie własnego DoH innych aplikacji.");
++        return out.toString();
++    }
++    private String routes() {
++        ConnectivityManager cm = (ConnectivityManager)getSystemService(CONNECTIVITY_SERVICE);
++        StringBuilder out = new StringBuilder();
++        for (android.net.Network n : cm.getAllNetworks()) {
++            var caps = cm.getNetworkCapabilities(n); var lp = cm.getLinkProperties(n);
++            if (caps != null && caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN) && lp != null)
++                out.append("Interfejs VPN: ").append(lp.getInterfaceName()).append("\nAdresy: ")
++                   .append(lp.getLinkAddresses()).append("\nTrasy: ").append(lp.getRoutes()).append("\n");
++        }
++        if (out.length() == 0) out.append("Android nie zgłasza aktywnego VPN.\n");
++        // Only the public node address is displayed; never read identity.secret.
++        try (InputStream in = openFileInput("identity.public")) {
++            byte[] prefix = new byte[11]; int count = 0;
++            while (count < prefix.length) {
++                int n = in.read(prefix, count, prefix.length - count);
++                if (n < 0) break;
++                count += n;
++            }
++            String id = new String(prefix, 0, count, StandardCharsets.US_ASCII);
++            if (id.matches("[0-9a-fA-F]{10}:"))
++                out.append("ID tego klienta ZeroTier: ").append(id.substring(0,10)).append("\n");
++        } catch (IOException absent) { out.append("Tożsamość ZeroTier jeszcze niedostępna.\n"); }
++        String selected = TvGatewayStore.getActiveTunerId(this);
++        for (TvGatewayProfile p : TvGatewayStore.load(this)) if (p.getTunerId().equals(selected))
++            out.append("Wybrana brama: ").append(p.getGatewayIpv4()).append("\nSieć ZT: ").append(p.getNetworkIdHex())
++                .append("\nIPv6 zablokowany dla tej bramy IPv4; brak potwierdzonej bramy IPv6.");
++        return out.toString();
++    }
++    @Override protected void onDestroy() {
++        cancelled=true; HttpsURLConnection c=connection; if(c!=null)c.disconnect(); worker.shutdownNow(); super.onDestroy();
++    }
++}
+diff --git a/app/src/main/java/net/kaaass/zerotierfix/ui/tv/TvGatewayStore.java b/app/src/main/java/net/kaaass/zerotierfix/ui/tv/TvGatewayStore.java
+index 8651a86..628e5aa 100644
+--- a/app/src/main/java/net/kaaass/zerotierfix/ui/tv/TvGatewayStore.java
++++ b/app/src/main/java/net/kaaass/zerotierfix/ui/tv/TvGatewayStore.java
+@@ -14,7 +14,16 @@ public final class TvGatewayStore {
+     }
+ 
+     public static List<TvGatewayProfile> load(Context context) {
+-        return TvGatewayCodec.decode(prefs(context).getString(PREF_GATEWAYS, null));
++        String saved = prefs(context).getString(PREF_GATEWAYS, null);
++        if (saved == null) return defaults();
++        return TvGatewayCodec.decode(saved);
++    }
++
++    /** Read-only BlackServ audit 2026-11-04: next hops are the routers behind proxy-ARP tuners. */
++    public static List<TvGatewayProfile> defaults() {
++        return java.util.Arrays.asList(
++            new TvGatewayProfile("#5", "Tuner #5 — Polska", "05b1a061a1000001", "192.168.18.1", "91.227.216.230"),
++            new TvGatewayProfile("#9", "Tuner #9 — Polska", "c0edc64972000001", "192.168.100.1", "185.148.67.216"));
+     }
+ 
+     public static void save(Context context, List<TvGatewayProfile> gateways) {
+diff --git a/app/src/main/java/net/kaaass/zerotierfix/ui/tv/TvHomeActivity.java b/app/src/main/java/net/kaaass/zerotierfix/ui/tv/TvHomeActivity.java
+index 832de2c..e9b7984 100644
+--- a/app/src/main/java/net/kaaass/zerotierfix/ui/tv/TvHomeActivity.java
++++ b/app/src/main/java/net/kaaass/zerotierfix/ui/tv/TvHomeActivity.java
+@@ -52,7 +52,8 @@ import java.util.concurrent.Executors;
+  * a ZeroTier network name is never presented as a verified tuner identity.
+  */
+ public final class TvHomeActivity extends AppCompatActivity {
+-    private static final int REQUEST_VPN = 804;
++    private static final int REQUEST_VPN = 804, EXPORT = 805, IMPORT = 806;
++    private TvGatewayProfile pendingSwitch;
+     private final EventBus events = EventBus.getDefault();
+     private final List<TvGatewayProfile> gateways = new ArrayList<>();
+     private LinearLayout cards;
+@@ -110,16 +111,7 @@ public final class TvHomeActivity extends AppCompatActivity {
+         cards.setOrientation(LinearLayout.VERTICAL);
+         root.addView(cards, verticalSpace(26));
+ 
+-        TextView add = action("Dodaj tuner", () -> showAddDialog());
+-        root.addView(add, verticalSpace(18));
+-
+-        TextView bypass = action("Aplikacje poza VPN", () ->
+-                startActivity(new Intent(this, TvBypassActivity.class)));
+-        root.addView(bypass, verticalSpace(12));
+-
+-        TextView networkSettings = action("Sieci ZeroTier", () ->
+-                startActivity(new Intent(this, JoinNetworkActivity.class)));
+-        root.addView(networkSettings, verticalSpace(12));
++        root.addView(action("Ustawienia", this::showSettings), verticalSpace(18));
+ 
+         TextView caption = text(
+                 "Zielony status pojawi się dopiero po weryfikacji polskiego adresu wyjściowego.",
+@@ -140,6 +132,9 @@ public final class TvHomeActivity extends AppCompatActivity {
+         }
+         serviceRunning = false;
+         networkReady = false;
++        verificationProblem = android.preference.PreferenceManager.getDefaultSharedPreferences(this)
++                .getString("blackserv_tv_last_error", null);
++        connectionError = verificationProblem != null;
+         refreshCards();
+         events.post(new IsServiceRunningRequestEvent());
+         events.post(new NetworkListRequestEvent());
+@@ -198,9 +193,15 @@ public final class TvHomeActivity extends AppCompatActivity {
+                 break;
+             }
+         }
+-        if (gateways.isEmpty()) {
+-            cards.addView(text("Nie dodano jeszcze żadnego tunera. Wprowadź zweryfikowane dane ZeroTier.",
+-                    20, R.color.tv_muted, false));
++        for (String slot : new String[]{"#5", "#9"}) {
++            boolean configured = false;
++            for (TvGatewayProfile p : gateways) if (p.getTunerId().equals(slot)) configured = true;
++            if (!configured) {
++                TextView empty = action("Tuner " + slot + " — Polska\nBrak konfiguracji bramy · OK: ustaw", () -> showProfileDialog(slot, null));
++                empty.setTag(slot);
++                empty.setMinimumHeight(dp(112));
++                cards.addView(empty, verticalSpace(12));
++            }
+         }
+ 
+         for (int index = 0; index < gateways.size(); index++) {
+@@ -221,8 +222,8 @@ public final class TvHomeActivity extends AppCompatActivity {
+                     + ", " + label(status));
+             card.addView(text(profile.getTunerId(), 26, R.color.tv_text, true));
+             card.addView(text(profile.getDisplayName(), 19, R.color.tv_muted, false));
+-            card.addView(text("ZT " + profile.getNetworkIdHex()
+-                    + "     brama " + profile.getGatewayIpv4(), 16, R.color.tv_muted, false));
++            card.addView(text(profile.getTunerId().equals(selectedId) && verifiedPublicIp != null
++                    ? "Publiczny IP: " + verifiedPublicIp : "OK: połącz / rozłącz", 16, R.color.tv_muted, false));
+             int stateColor = statusColor(status);
+             card.addView(text(label(status), 17, stateColor, true));
+ 
+@@ -261,22 +262,23 @@ public final class TvHomeActivity extends AppCompatActivity {
+     private void toggle(TvGatewayProfile profile) {
+         String current = TvGatewayStore.getActiveTunerId(this);
+         if (profile.getTunerId().equals(current)) {
++            pendingSwitch = null;
+             disconnect();
+             return;
+         }
+         if (current != null || serviceRunning) {
++            pendingSwitch = profile;
+             disconnect();
+-            Toast.makeText(this, "Rozłączono poprzednią bramę. Wybierz nową ponownie.",
+-                    Toast.LENGTH_LONG).show();
+-            return;
+-        }
+-        Network stored = ((ZerotierFixApplication) getApplication())
+-                .getDaoSession().getNetworkDao().load(profile.getNetworkId());
+-        if (stored == null) {
+-            Toast.makeText(this, "Najpierw dodaj tę sieć ZeroTier", Toast.LENGTH_LONG).show();
+-            startActivity(new Intent(this, JoinNetworkActivity.class));
++            uiHandler.postDelayed(() -> {
++                if (pendingSwitch != null && tvResumed) {
++                    TvGatewayProfile next = pendingSwitch;
++                    pendingSwitch = null;
++                    toggle(next);
++                }
++            }, 500);
+             return;
+         }
++        TvNetworkStore.ensure(this, profile);
+         Intent approval = VpnService.prepare(this);
+         if (approval != null) {
+             pendingConsent = profile;
+@@ -287,6 +289,7 @@ public final class TvHomeActivity extends AppCompatActivity {
+     }
+ 
+     private void connect(TvGatewayProfile profile) {
++        android.preference.PreferenceManager.getDefaultSharedPreferences(this).edit().remove("blackserv_tv_last_error").apply();
+         exitSession.select(profile.getTunerId());
+         resetExitVerification();
+         connectionError = false;
+@@ -295,14 +298,13 @@ public final class TvHomeActivity extends AppCompatActivity {
+         TvGatewayStore.setActiveTunerId(this, profile.getTunerId());
+         Intent start = new Intent(this, ZeroTierOneService.class);
+         start.putExtra(ZeroTierOneService.ZT1_NETWORK_ID, profile.getNetworkId());
+-        startService(start);
++        ContextCompat.startForegroundService(this, start);
+         render();
+     }
+ 
+     private void disconnect() {
+         exitSession.clear();
+         resetExitVerification();
+-        events.post(new StopEvent());
+         stopService(new Intent(this, ZeroTierOneService.class));
+         TvGatewayStore.setActiveTunerId(this, null);
+         pendingConsent = null;
+@@ -316,6 +318,35 @@ public final class TvHomeActivity extends AppCompatActivity {
+     @Override
+     protected void onActivityResult(int request, int result, @Nullable Intent data) {
+         super.onActivityResult(request, result, data);
++        if ((request == EXPORT || request == IMPORT) && result == RESULT_OK && data != null && data.getData() != null) {
++            try {
++                if (request == EXPORT) {
++                    try (java.io.OutputStream out = getContentResolver().openOutputStream(data.getData(), "wt")) {
++                        if (out == null) throw new IOException("Nie można otworzyć pliku");
++                        out.write(TvBackup.exportSettings(this).getBytes(java.nio.charset.StandardCharsets.UTF_8));
++                    }
++                    Toast.makeText(this, "Backup zapisany", Toast.LENGTH_LONG).show();
++                } else {
++                    java.io.ByteArrayOutputStream bytes = new java.io.ByteArrayOutputStream();
++                    try (java.io.InputStream in = getContentResolver().openInputStream(data.getData())) {
++                        if (in == null) throw new IOException("Nie można otworzyć pliku");
++                        byte[] buffer = new byte[4096]; int n;
++                        while ((n = in.read(buffer)) != -1) {
++                            if (bytes.size() + n > TvBackup.MAX_BYTES) throw new IOException("Plik jest zbyt duży");
++                            bytes.write(buffer, 0, n);
++                        }
++                    }
++                    TvBackup.Settings imported = TvBackup.decode(bytes.toString("UTF-8"));
++                    new AlertDialog.Builder(this).setTitle("Przywrócić ustawienia?")
++                        .setMessage("Zastąpi zapisane profile, DNS i wyjątki. Tożsamość ZeroTier pozostanie bez zmian.")
++                        .setNegativeButton("Anuluj", null).setPositiveButton("Przywróć", (d,w) -> {
++                            disconnect();
++                            try { TvBackup.restore(this, imported); refreshCards(); }
++                            catch (RuntimeException failure) { showProblem(failure.getMessage()); }
++                        }).show();
++                }
++            } catch (Exception failure) { showProblem("Backup: " + failure.getMessage()); }
++        }
+         if (request == REQUEST_VPN) {
+             TvGatewayProfile approved = pendingConsent;
+             pendingConsent = null;
+@@ -352,8 +383,18 @@ public final class TvHomeActivity extends AppCompatActivity {
+         boolean ready = false;
+         if (active != null && reply.getNetworkList() != null) {
+             for (VirtualNetworkConfig config : reply.getNetworkList()) {
+-                if (config != null && config.getNwid() == active.getNetworkId()
+-                        && config.getStatus() == VirtualNetworkStatus.NETWORK_STATUS_OK) {
++                if (config == null || config.getNwid() != active.getNetworkId()) continue;
++                if (config.getStatus() != VirtualNetworkStatus.NETWORK_STATUS_OK) {
++                    verificationProblem = "ZeroTier: " + config.getStatus().toString();
++                    connectionError = config.getStatus().toString().contains("ACCESS_DENIED")
++                            || config.getStatus().toString().contains("NOT_FOUND");
++                    render();
++                }
++                if (config.getStatus() == VirtualNetworkStatus.NETWORK_STATUS_OK
++                        && config.getAssignedAddresses().length > 0) {
++                    if (verificationProblem != null && verificationProblem.startsWith("ZeroTier:")) {
++                        connectionError = false; verificationProblem = null;
++                    }
+                     newNetworkId = config.getNwid();
+                     ready = true;
+                     break;
+@@ -386,6 +427,7 @@ public final class TvHomeActivity extends AppCompatActivity {
+     public void onError(VPNErrorEvent error) {
+         resetExitVerification();
+         connectionError = true;
++        verificationProblem = error.getMessage();
+         render();
+     }
+ 
+@@ -463,15 +505,23 @@ public final class TvHomeActivity extends AppCompatActivity {
+         });
+     }
+ 
+-    private void showAddDialog() {
++    private void showAddDialog() { showProfileDialog("", null); }
++
++    private void showProfileDialog(String slot, TvGatewayProfile existing) {
+         LinearLayout form = new LinearLayout(this);
+         form.setOrientation(LinearLayout.VERTICAL);
+         form.setPadding(dp(24), dp(10), dp(24), dp(10));
+-        EditText id = input("ID tunera, np. u39.romek");
++        EditText id = input("ID tunera");
+         EditText title = input("Nazwa, np. Romek");
+         EditText nwid = input("ZeroTier Network ID (16 znaków hex)");
+         EditText gateway = input("Adres ZeroTier tunera (IPv4)");
+         EditText expected = input("Polski publiczny IP (opcjonalnie)");
++        id.setText(existing == null ? slot : existing.getTunerId());
++        title.setText(existing == null ? "Tuner " + slot + " — Polska" : existing.getDisplayName());
++        if (existing != null) {
++            nwid.setText(existing.getNetworkIdHex()); gateway.setText(existing.getGatewayIpv4());
++            expected.setText(existing.getExpectedPublicIpv4());
++        }
+         for (EditText field : new EditText[]{id, title, nwid, gateway, expected}) {
+             form.addView(field);
+         }
+@@ -486,7 +536,10 @@ public final class TvHomeActivity extends AppCompatActivity {
+                                 nwid.getText().toString(), gateway.getText().toString(),
+                                 expected.getText().toString());
+                         List<TvGatewayProfile> copy = new ArrayList<>(gateways);
++                        copy.removeIf(p -> p.getTunerId().equals(profile.getTunerId()));
+                         copy.add(profile);
++                        if (profile.getTunerId().equals(TvGatewayStore.getActiveTunerId(this))) disconnect();
++                        TvNetworkStore.ensure(this, profile);
+                         TvGatewayStore.save(this, copy);
+                         refreshCards();
+                     } catch (IllegalArgumentException invalid) {
+@@ -495,6 +548,59 @@ public final class TvHomeActivity extends AppCompatActivity {
+                 }).show();
+     }
+ 
++
++    private void showProblem(String message) {
++        new AlertDialog.Builder(this).setTitle("Nie wykonano operacji").setMessage(message)
++            .setPositiveButton("Zamknij", null).show();
++    }
++    private void showSettings() {
++        String[] options = {"Profile tunerów", "Aplikacje bez VPN", "Diagnostyka", "DNS",
++            "Uruchamianie po restarcie", "Eksport ustawień JSON", "Import ustawień JSON"};
++        new AlertDialog.Builder(this).setTitle("Ustawienia").setItems(options, (d, which) -> {
++            switch (which) {
++                case 0:
++                    List<String> names = new ArrayList<>();
++                    for (TvGatewayProfile p : gateways) names.add(p.getTunerId() + " · " + p.getDisplayName());
++                    names.add("Dodaj profil");
++                    new AlertDialog.Builder(this).setTitle("Profile tunerów")
++                        .setItems(names.toArray(new String[0]), (a, index) -> {
++                            if (index == gateways.size()) showAddDialog();
++                            else showProfileDialog(gateways.get(index).getTunerId(), gateways.get(index));
++                        }).show(); break;
++                case 1: startActivity(new Intent(this, TvBypassActivity.class)); break;
++                case 2: startActivity(new Intent(this, TvDiagnosticsActivity.class)); break;
++                case 3:
++                    EditText dns = input("DNS oddzielone przecinkami"); dns.setText(TvNetworkSettings.dns(this));
++                    new AlertDialog.Builder(this).setTitle("DNS przez VPN").setView(dns)
++                        .setNegativeButton("Anuluj", null).setPositiveButton("Zapisz", (a,b) -> {
++                            try {
++                                String value = String.join(",", TvNetworkSettings.parseDns(dns.getText().toString()));
++                                android.preference.PreferenceManager.getDefaultSharedPreferences(this).edit()
++                                    .putString(TvNetworkSettings.DNS, value).apply();
++                                Toast.makeText(this, "Zapisano. Połącz VPN ponownie.", Toast.LENGTH_LONG).show();
++                            } catch (IllegalArgumentException error) { showProblem(error.getMessage()); }
++                        }).show(); break;
++                case 4:
++                    var prefs = android.preference.PreferenceManager.getDefaultSharedPreferences(this);
++                    boolean boot = prefs.getBoolean(TvNetworkSettings.BOOT, false);
++                    new AlertDialog.Builder(this).setTitle("Po restarcie")
++                        .setSingleChoiceItems(new String[]{"Nie łącz automatycznie", "Przywróć ostatnio aktywny profil"}, boot ? 1 : 0,
++                            (a,index) -> { prefs.edit().putBoolean(TvNetworkSettings.BOOT, index == 1).apply(); a.dismiss(); }).show(); break;
++                case 5: document(EXPORT); break;
++                case 6: document(IMPORT); break;
++            }
++        }).setNegativeButton("Wstecz", null).show();
++    }
++    private void document(int request) {
++        Intent pick = new Intent(request == EXPORT ? Intent.ACTION_CREATE_DOCUMENT : Intent.ACTION_OPEN_DOCUMENT);
++        pick.addCategory(Intent.CATEGORY_OPENABLE); pick.setType("application/json");
++        if (request == EXPORT) pick.putExtra(Intent.EXTRA_TITLE, "blackserv-zerotier-tv.json");
++        try { startActivityForResult(pick, request); }
++        catch (android.content.ActivityNotFoundException missing) {
++            showProblem("Brak systemowego wyboru plików. Zainstaluj aplikację obsługującą dokumenty na Android TV.");
++        }
++    }
++
+     private void confirmDelete(TvGatewayProfile profile) {
+         new AlertDialog.Builder(this)
+                 .setTitle("Usunąć zapisany tuner?")
+diff --git a/app/src/main/java/net/kaaass/zerotierfix/ui/tv/TvNetworkSettings.java b/app/src/main/java/net/kaaass/zerotierfix/ui/tv/TvNetworkSettings.java
+new file mode 100644
+index 0000000..d0bfbae
+--- /dev/null
++++ b/app/src/main/java/net/kaaass/zerotierfix/ui/tv/TvNetworkSettings.java
+@@ -0,0 +1,26 @@
++package net.kaaass.zerotierfix.ui.tv;
++
++import android.content.Context;
++import android.preference.PreferenceManager;
++import java.util.ArrayList;
++import java.util.List;
++
++public final class TvNetworkSettings {
++    public static final String DNS = "blackserv_tv_dns";
++    public static final String BOOT = "blackserv_tv_boot";
++    private TvNetworkSettings() { }
++    public static String dns(Context c) {
++        return PreferenceManager.getDefaultSharedPreferences(c).getString(DNS, "1.1.1.1,1.0.0.1");
++    }
++    public static List<String> parseDns(String raw) {
++        List<String> values = new ArrayList<>();
++        for (String value : raw.split(",", -1)) {
++            String ip = value.trim();
++            if (!org.apache.commons.validator.routines.InetAddressValidator.getInstance().isValid(ip))
++                throw new IllegalArgumentException("DNS musi być adresem IPv4 lub IPv6");
++            if (!values.contains(ip)) values.add(ip);
++        }
++        if (values.isEmpty() || values.size() > 4) throw new IllegalArgumentException("Podaj 1–4 adresy DNS");
++        return values;
++    }
++}
+diff --git a/app/src/main/java/net/kaaass/zerotierfix/ui/tv/TvNetworkStore.java b/app/src/main/java/net/kaaass/zerotierfix/ui/tv/TvNetworkStore.java
+new file mode 100644
+index 0000000..eafb3f3
+--- /dev/null
++++ b/app/src/main/java/net/kaaass/zerotierfix/ui/tv/TvNetworkStore.java
+@@ -0,0 +1,32 @@
++package net.kaaass.zerotierfix.ui.tv;
++
++import android.content.Context;
++import net.kaaass.zerotierfix.ZerotierFixApplication;
++import net.kaaass.zerotierfix.model.Network;
++import net.kaaass.zerotierfix.model.NetworkConfig;
++import net.kaaass.zerotierfix.util.DatabaseUtils;
++
++/** A profile and its ZeroTier membership are one TV workflow. */
++public final class TvNetworkStore {
++    private TvNetworkStore() { }
++    public static void ensure(Context context, TvGatewayProfile profile) {
++        var dao = ((ZerotierFixApplication) context.getApplicationContext()).getDaoSession();
++        DatabaseUtils.writeLock.lock();
++        try {
++            dao.runInTx(() -> {
++                if (dao.getNetworkDao().load(profile.getNetworkId()) != null) return;
++                NetworkConfig config = new NetworkConfig();
++                config.setId(profile.getNetworkId());
++                config.setRouteViaZeroTier(true);
++                config.setDnsMode(1);
++                dao.getNetworkConfigDao().insertOrReplace(config);
++                Network network = new Network();
++                network.setNetworkId(profile.getNetworkId());
++                network.setNetworkIdStr(profile.getNetworkIdHex());
++                network.setNetworkName(profile.getDisplayName());
++                network.setNetworkConfigId(profile.getNetworkId());
++                dao.getNetworkDao().insert(network);
++            });
++        } finally { DatabaseUtils.writeLock.unlock(); }
++    }
++}
+diff --git a/app/src/main/res/values/strings.xml b/app/src/main/res/values/strings.xml
+index 7957704..45ed28f 100644
+--- a/app/src/main/res/values/strings.xml
++++ b/app/src/main/res/values/strings.xml
+@@ -1,6 +1,6 @@
+ <resources>
+     <string name="app_name">BlackServ ZeroTier TV</string>
+-    <string name="tv_app_name">BlackServ ZeroTier TV</string>
++    <string name="tv_app_name" translatable="false">BlackServ ZeroTier TV</string>
+ 
+     <string name="button_connect">Connect</string>
+     <string name="button_disconnect">Disconnect</string>
+diff --git a/app/src/test/java/net/kaaass/zerotierfix/service/VpnBypassConfigTest.java b/app/src/test/java/net/kaaass/zerotierfix/service/VpnBypassConfigTest.java
+index 02fba2f..42fcf73 100644
+--- a/app/src/test/java/net/kaaass/zerotierfix/service/VpnBypassConfigTest.java
++++ b/app/src/test/java/net/kaaass/zerotierfix/service/VpnBypassConfigTest.java
+@@ -9,9 +9,9 @@ import static org.junit.Assert.assertEquals;
+ 
+ public class VpnBypassConfigTest {
+     @Test
+-    public void defaultsKeepPlanetaPlTvInsideVpn() {
++    public void freshInstallRoutesEveryApplication() {
+         assertEquals(
+-                Collections.singletonList("com.android.vending"),
++                Collections.emptyList(),
+                 VpnBypassConfig.parse(null));
+     }
+ 
+diff --git a/app/src/test/java/net/kaaass/zerotierfix/ui/tv/TvBackupTest.java b/app/src/test/java/net/kaaass/zerotierfix/ui/tv/TvBackupTest.java
+new file mode 100644
+index 0000000..84e04fe
+--- /dev/null
++++ b/app/src/test/java/net/kaaass/zerotierfix/ui/tv/TvBackupTest.java
+@@ -0,0 +1,47 @@
++package net.kaaass.zerotierfix.ui.tv;
++import org.junit.Test;
++import java.util.Collections;
++import static org.junit.Assert.*;
++public class TvBackupTest {
++    private String valid() throws Exception {
++        return TvBackup.encode(Collections.singletonList(new TvGatewayProfile("#5", "Zażółć — Polska", "0123456789abcdef", "10.1.1.1", "91.1.2.3")),
++            "1.1.1.1,1.0.0.1", "com.example.player", true);
++    }
++    @Test public void profilesUseControllerNextHopsNotTunersLanAddresses() {
++        var p = TvGatewayStore.defaults();
++        assertEquals("192.168.18.1", p.get(0).getGatewayIpv4());
++        assertEquals("192.168.100.1", p.get(1).getGatewayIpv4());
++        assertEquals("05b1a061a1000001", p.get(0).getNetworkIdHex());
++        assertEquals("c0edc64972000001", p.get(1).getNetworkIdHex());
++    }
++    @Test public void roundTripPreservesProfilesDnsAndExclusions() throws Exception {
++        var s = TvBackup.decode(valid());
++        assertEquals("Zażółć — Polska", s.profiles.get(0).getDisplayName());
++        assertEquals("10.1.1.1", s.profiles.get(0).getGatewayIpv4());
++        assertEquals("91.1.2.3", s.profiles.get(0).getExpectedPublicIpv4());
++        assertEquals("1.1.1.1,1.0.0.1", s.dns);
++        assertEquals("com.example.player", s.exclusions); assertTrue(s.boot);
++    }
++    @Test public void emptySelectionRemainsEmpty() throws Exception {
++        var s = TvBackup.decode(TvBackup.encode(Collections.emptyList(), "1.1.1.1", "", false));
++        assertTrue(s.profiles.isEmpty()); assertEquals("", s.exclusions); assertFalse(s.boot);
++    }
++    @Test public void backupHasNoIdentityOrSession() throws Exception {
++        assertFalse(valid().contains("identity")); assertFalse(valid().contains("activeTuner"));
++    }
++    @Test(expected=IllegalArgumentException.class) public void rejectsUnknownVersion() throws Exception {
++        TvBackup.decode(valid().replace("\"version\": 1", "\"version\": 99"));
++    }
++    @Test(expected=IllegalArgumentException.class) public void rejectsInvalidGateway() throws Exception {
++        TvBackup.decode(valid().replace("10.1.1.1", "999.1.1.1"));
++    }
++    @Test(expected=IllegalArgumentException.class) public void rejectsDnsHostname() throws Exception {
++        TvNetworkSettings.parseDns("example.com");
++    }
++    @Test public void acceptsIpv6DnsAndDeduplicates() {
++        assertEquals(2, TvNetworkSettings.parseDns("1.1.1.1,2606:4700:4700::1111,1.1.1.1").size());
++    }
++    @Test(expected=IllegalArgumentException.class) public void rejectsTooLargeBackup() throws Exception {
++        TvBackup.decode(new String(new char[TvBackup.MAX_BYTES+1]));
++    }
++}
+diff --git a/core/build.gradle b/core/build.gradle
+index bc9c24e..62e6c88 100644
+--- a/core/build.gradle
++++ b/core/build.gradle
+@@ -3,6 +3,7 @@ plugins {
+ }
+ 
+ android {
++    ndkVersion '23.1.7779620'
+     compileSdkVersion rootProject.ext.compileSdkVersion
+ 
+     sourceSets {

@@ -1,0 +1,391 @@
+diff --git a/app/build.gradle b/app/build.gradle
+index fa82fbe..8d06074 100644
+--- a/app/build.gradle
++++ b/app/build.gradle
+@@ -15,8 +15,8 @@ android {
+         applicationId "uk.blackserv.zerotiertv"
+         minSdkVersion 23
+         targetSdkVersion rootProject.ext.targetSdkVersion
+-        versionCode 17
+-        versionName "1.1.2-tv-preview"
++        versionCode 20
++        versionName "1.1.5-tv-preview"
+         multiDexEnabled true
+ 
+         testInstrumentationRunner 'androidx.test.runner.AndroidJUnitRunner'
+diff --git a/app/src/main/AndroidManifest.xml b/app/src/main/AndroidManifest.xml
+index e586cd0..485105f 100644
+--- a/app/src/main/AndroidManifest.xml
++++ b/app/src/main/AndroidManifest.xml
+@@ -25,6 +25,7 @@
+         android:name="net.kaaass.zerotierfix.ZerotierFixApplication"
+         android:allowBackup="false"
+         android:appComponentFactory="androidx.core.app.CoreComponentFactory"
++        android:banner="@drawable/tv_banner"
+         android:icon="@drawable/tv_icon"
+         android:label="@string/app_name"
+         android:roundIcon="@drawable/tv_icon"
+diff --git a/app/src/main/java/net/kaaass/zerotierfix/service/ZeroTierOneService.java b/app/src/main/java/net/kaaass/zerotierfix/service/ZeroTierOneService.java
+index 35acece..c2997a7 100644
+--- a/app/src/main/java/net/kaaass/zerotierfix/service/ZeroTierOneService.java
++++ b/app/src/main/java/net/kaaass/zerotierfix/service/ZeroTierOneService.java
+@@ -5,6 +5,10 @@ import android.app.NotificationManager;
+ import android.app.PendingIntent;
+ import android.content.Context;
+ import android.content.Intent;
++import android.net.ConnectivityManager;
++import android.net.IpPrefix;
++import android.net.LinkProperties;
++import android.net.RouteInfo;
+ import android.net.VpnService;
+ import android.os.Binder;
+ import android.os.Build;
+@@ -986,6 +990,23 @@ public class ZeroTierOneService extends VpnService implements Runnable, EventLis
+             return false;
+         }
+ 
++        if (Build.VERSION.SDK_INT >= 33) {
++            ConnectivityManager connectivity = getSystemService(ConnectivityManager.class);
++            LinkProperties underlying = connectivity == null ? null
++                    : connectivity.getLinkProperties(connectivity.getActiveNetwork());
++            if (underlying != null) {
++                for (RouteInfo route : underlying.getRoutes()) {
++                    IpPrefix destination = route.getDestination();
++                    if (destination != null && TvRoutePolicy.bypassUnderlyingIpv4(
++                            destination.getAddress(), destination.getPrefixLength(),
++                            route.hasGateway())) {
++                        builder.excludeRoute(destination);
++                        Log.i(TAG, "Keeping underlying LAN outside VPN: " + destination);
++                    }
++                }
++            }
++        }
++
+         if (Build.VERSION.SDK_INT >= 29) {
+             builder.setMetered(false);
+         }
+diff --git a/app/src/main/java/net/kaaass/zerotierfix/ui/tv/TvGatewayStore.java b/app/src/main/java/net/kaaass/zerotierfix/ui/tv/TvGatewayStore.java
+index 628e5aa..3a1a8cc 100644
+--- a/app/src/main/java/net/kaaass/zerotierfix/ui/tv/TvGatewayStore.java
++++ b/app/src/main/java/net/kaaass/zerotierfix/ui/tv/TvGatewayStore.java
+@@ -23,7 +23,8 @@ public final class TvGatewayStore {
+     public static List<TvGatewayProfile> defaults() {
+         return java.util.Arrays.asList(
+             new TvGatewayProfile("#5", "Tuner #5 — Polska", "05b1a061a1000001", "192.168.18.1", "91.227.216.230"),
+-            new TvGatewayProfile("#9", "Tuner #9 — Polska", "c0edc64972000001", "192.168.100.1", "185.148.67.216"));
++            new TvGatewayProfile("#9", "Tuner #9 — Polska", "c0edc64972000001", "192.168.100.1", "185.148.67.216"),
++            new TvGatewayProfile("#23", "Tuner #23 — Polska", "a581878f7d6c0187", "10.32.73.190", "91.227.218.90"));
+     }
+ 
+     public static void save(Context context, List<TvGatewayProfile> gateways) {
+diff --git a/app/src/main/java/net/kaaass/zerotierfix/ui/tv/TvHomeActivity.java b/app/src/main/java/net/kaaass/zerotierfix/ui/tv/TvHomeActivity.java
+index 1ac98bb..990917c 100644
+--- a/app/src/main/java/net/kaaass/zerotierfix/ui/tv/TvHomeActivity.java
++++ b/app/src/main/java/net/kaaass/zerotierfix/ui/tv/TvHomeActivity.java
+@@ -251,20 +251,19 @@ public final class TvHomeActivity extends AppCompatActivity {
+     private void toggle(TvGatewayProfile profile) {
+         String current = TvGatewayStore.getActiveTunerId(this);
+         if (profile.getTunerId().equals(current)) {
+-            pendingSwitch = null;
+-            disconnect();
+-            return;
++            if (serviceRunning) {
++                pendingSwitch = null;
++                disconnect();
++                return;
++            }
++            // A process stop can leave only the selected-profile preference.
++            // Treat it as stale and reconnect with this single click.
++            TvGatewayStore.setActiveTunerId(this, null);
++            current = null;
+         }
+         if (current != null || serviceRunning) {
+             pendingSwitch = profile;
+             disconnect();
+-            uiHandler.postDelayed(() -> {
+-                if (pendingSwitch != null && tvResumed) {
+-                    TvGatewayProfile next = pendingSwitch;
+-                    pendingSwitch = null;
+-                    toggle(next);
+-                }
+-            }, 500);
+             return;
+         }
+         TvNetworkStore.ensure(this, profile);
+@@ -410,6 +409,19 @@ public final class TvHomeActivity extends AppCompatActivity {
+             verificationProblem = "Tunel VPN przerwany. Rozłącz i połącz ponownie.";
+         }
+         render();
++        if (pendingSwitch != null) {
++            TvGatewayProfile next = pendingSwitch;
++            pendingSwitch = null;
++            // NodeDestroyed is posted synchronously just before node.close().
++            // Queue the replacement so it starts only after teardown returns.
++            uiHandler.post(() -> {
++                if (tvResumed) {
++                    toggle(next);
++                } else {
++                    pendingSwitch = next;
++                }
++            });
++        }
+     }
+ 
+     @Subscribe(threadMode = ThreadMode.MAIN)
+diff --git a/app/src/main/java/net/kaaass/zerotierfix/ui/tv/TvRoutePolicy.java b/app/src/main/java/net/kaaass/zerotierfix/ui/tv/TvRoutePolicy.java
+index 96f5d00..f2b9582 100644
+--- a/app/src/main/java/net/kaaass/zerotierfix/ui/tv/TvRoutePolicy.java
++++ b/app/src/main/java/net/kaaass/zerotierfix/ui/tv/TvRoutePolicy.java
+@@ -1,5 +1,8 @@
+ package net.kaaass.zerotierfix.ui.tv;
+ 
++import java.net.Inet4Address;
++import java.net.InetAddress;
++
+ /**
+  * A tuner gateway configured only with IPv4 must not permit IPv6 fallthrough.
+  * VpnService.Builder blocks a family without any address, route or DNS for it.
+@@ -11,4 +14,11 @@ public final class TvRoutePolicy {
+     public static boolean disableIpv6(boolean userDisabled, boolean selectedIpv4Gateway) {
+         return userDisabled || selectedIpv4Gateway;
+     }
++
++    /** Keep the directly attached private LAN outside a full-tunnel VPN. */
++    public static boolean bypassUnderlyingIpv4(InetAddress address, int prefix,
++                                               boolean hasGateway) {
++        return !hasGateway && prefix > 0 && address instanceof Inet4Address
++                && address.isSiteLocalAddress();
++    }
+ }
+diff --git a/app/src/test/java/net/kaaass/zerotierfix/ui/tv/TvBackupTest.java b/app/src/test/java/net/kaaass/zerotierfix/ui/tv/TvBackupTest.java
+index 84e04fe..1285c3b 100644
+--- a/app/src/test/java/net/kaaass/zerotierfix/ui/tv/TvBackupTest.java
++++ b/app/src/test/java/net/kaaass/zerotierfix/ui/tv/TvBackupTest.java
+@@ -13,6 +13,8 @@ public class TvBackupTest {
+         assertEquals("192.168.100.1", p.get(1).getGatewayIpv4());
+         assertEquals("05b1a061a1000001", p.get(0).getNetworkIdHex());
+         assertEquals("c0edc64972000001", p.get(1).getNetworkIdHex());
++        assertEquals("a581878f7d6c0187", p.get(2).getNetworkIdHex());
++        assertEquals("10.32.73.190", p.get(2).getGatewayIpv4());
+     }
+     @Test public void roundTripPreservesProfilesDnsAndExclusions() throws Exception {
+         var s = TvBackup.decode(valid());
+diff --git a/app/src/test/java/net/kaaass/zerotierfix/ui/tv/TvLauncherConfigurationTest.java b/app/src/test/java/net/kaaass/zerotierfix/ui/tv/TvLauncherConfigurationTest.java
+new file mode 100644
+index 0000000..155eb9c
+--- /dev/null
++++ b/app/src/test/java/net/kaaass/zerotierfix/ui/tv/TvLauncherConfigurationTest.java
+@@ -0,0 +1,35 @@
++package net.kaaass.zerotierfix.ui.tv;
++
++import android.content.Context;
++import android.content.pm.ApplicationInfo;
++import org.junit.Test;
++import org.junit.runner.RunWith;
++import org.robolectric.RobolectricTestRunner;
++import org.robolectric.RuntimeEnvironment;
++import org.robolectric.annotation.Config;
++
++import static org.junit.Assert.*;
++
++@RunWith(RobolectricTestRunner.class)
++@Config(sdk = 28)
++public class TvLauncherConfigurationTest {
++    @Test public void defaultsContainCurrentTuner23Profile() {
++        TvGatewayProfile tuner23 = null;
++        for (TvGatewayProfile profile : TvGatewayStore.defaults()) {
++            if ("#23".equals(profile.getTunerId())) tuner23 = profile;
++        }
++
++        assertNotNull("Tuner #23 must be visible after a clean install", tuner23);
++        assertEquals("a581878f7d6c0187", tuner23.getNetworkIdHex());
++        assertEquals("10.32.73.190", tuner23.getGatewayIpv4());
++        assertEquals("91.227.218.90", tuner23.getExpectedPublicIpv4());
++    }
++
++    @Test public void applicationPublishesTvBannerForGoogleTvLauncher() throws Exception {
++        Context context = RuntimeEnvironment.getApplication();
++        ApplicationInfo app = context.getPackageManager()
++            .getApplicationInfo(context.getPackageName(), 0);
++
++        assertNotEquals("The application-level TV banner must not be missing", 0, app.banner);
++    }
++}
+diff --git a/app/src/test/java/net/kaaass/zerotierfix/ui/tv/TvProfileDeletionTest.java b/app/src/test/java/net/kaaass/zerotierfix/ui/tv/TvProfileDeletionTest.java
+new file mode 100644
+index 0000000..96a9c52
+--- /dev/null
++++ b/app/src/test/java/net/kaaass/zerotierfix/ui/tv/TvProfileDeletionTest.java
+@@ -0,0 +1,144 @@
++package net.kaaass.zerotierfix.ui.tv;
++
++import android.app.AlertDialog;
++import android.content.Context;
++import android.preference.PreferenceManager;
++import android.view.View;
++import android.view.ViewGroup;
++import android.widget.EditText;
++import net.kaaass.zerotierfix.events.NodeDestroyedEvent;
++import org.junit.*;
++import org.junit.runner.RunWith;
++import org.robolectric.Robolectric;
++import org.robolectric.RobolectricTestRunner;
++import org.robolectric.RuntimeEnvironment;
++import org.robolectric.android.controller.ActivityController;
++import org.robolectric.annotation.Config;
++import org.robolectric.shadows.ShadowAlertDialog;
++import java.util.*;
++import java.util.concurrent.TimeUnit;
++import static org.junit.Assert.*;
++
++/** Real activity rendering, dialogs and SharedPreferences; never starts a VPN. */
++@RunWith(RobolectricTestRunner.class)
++@Config(sdk = 28)
++public class TvProfileDeletionTest {
++    private ActivityController<TvHomeActivity> controller;
++    private Context context;
++    @Before public void setUp() {
++        context = RuntimeEnvironment.getApplication();
++        PreferenceManager.getDefaultSharedPreferences(context).edit().clear().commit();
++        reopen();
++    }
++    @After public void tearDown() { close(); }
++    private void close() { if (controller != null) { controller.pause().stop().destroy(); controller = null; } }
++    private void reopen() { close(); controller = Robolectric.buildActivity(TvHomeActivity.class).setup(); }
++    private View card(String id) { return controller.get().getWindow().getDecorView().findViewWithTag(id); }
++    private void delete(String id) {
++        assertNotNull(card(id));
++        card(id).performLongClick();
++        ShadowAlertDialog.getLatestAlertDialog().getButton(AlertDialog.BUTTON_POSITIVE).performClick();
++        org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle();
++    }
++    @Test public void deletedCardIsAbsentImmediatelyAndAfterActivityRestart() {
++        delete("#5");
++        assertNull("Deleted profile must not leave a placeholder card", card("#5"));
++        assertNotNull(card("#9"));
++        reopen();
++        assertNull(card("#5"));
++        assertEquals(2, TvGatewayStore.load(context).size());
++    }
++    @Test public void deletingAllPersistsEmptyInsteadOfReseedingDefaults() {
++        delete("#5"); delete("#9"); delete("#23");
++        assertTrue(TvGatewayStore.load(context).isEmpty());
++        // Force queued apply() writes and verify the explicit empty-list marker is retained.
++        assertTrue(PreferenceManager.getDefaultSharedPreferences(context).edit().commit());
++        String persisted = PreferenceManager.getDefaultSharedPreferences(context)
++            .getString(TvGatewayStore.PREF_GATEWAYS, null);
++        assertNotNull("Empty list must be stored on disk rather than removing the preference", persisted);
++        assertTrue(TvGatewayCodec.decode(persisted).isEmpty());
++        reopen();
++        assertNull(card("#5")); assertNull(card("#9")); assertNull(card("#23"));
++        assertTrue(TvGatewayStore.load(context).isEmpty());
++    }
++    @Test public void deletingProfileDoesNotRemoveLocalNetworkMembership() {
++        TvGatewayProfile p = TvGatewayStore.load(context).get(0);
++        TvNetworkStore.ensure(context, p);
++        delete("#5");
++        net.kaaass.zerotierfix.ZerotierFixApplication app =
++            (net.kaaass.zerotierfix.ZerotierFixApplication) context;
++        assertNotNull(app.getDaoSession().getNetworkDao().load(p.getNetworkId()));
++    }
++    @Test public void readdingSameTunerViaDialogProducesExactlyOneCard() throws Exception {
++        TvGatewayProfile p = TvGatewayStore.load(context).get(0);
++        delete("#5");
++        java.lang.reflect.Method add = TvHomeActivity.class.getDeclaredMethod("showProfileDialog", String.class, TvGatewayProfile.class);
++        add.setAccessible(true);
++        for (int attempt=0; attempt<2; attempt++) {
++            add.invoke(controller.get(), "#5", null);
++            AlertDialog dialog = ShadowAlertDialog.getLatestAlertDialog();
++            List<EditText> fields = new ArrayList<>(); collect(dialog.getWindow().getDecorView(), fields);
++            String[] values = {p.getTunerId(), p.getDisplayName(), p.getNetworkIdHex(), p.getGatewayIpv4(), p.getExpectedPublicIpv4()};
++            assertEquals(values.length, fields.size());
++            for (int i=0;i<values.length;i++) fields.get(i).setText(values[i]);
++            dialog.getButton(AlertDialog.BUTTON_POSITIVE).performClick();
++        org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle();
++        }
++        reopen();
++        assertEquals(3, TvGatewayStore.load(context).size());
++        assertEquals(1, count(controller.get().getWindow().getDecorView(), "#5"));
++    }
++    @Test public void switchingWaitsForOldNodeDestructionBeforeStartingNewProfile() throws Exception {
++        TvGatewayStore.setActiveTunerId(context, "#9");
++        java.lang.reflect.Field running = TvHomeActivity.class.getDeclaredField("serviceRunning");
++        running.setAccessible(true);
++        running.setBoolean(controller.get(), true);
++        reopen();
++        running.setBoolean(controller.get(), true);
++
++        card("#5").performClick();
++        org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper())
++            .idleFor(600, TimeUnit.MILLISECONDS);
++
++        assertNull("A fixed delay must not start the replacement while the old node may still exist",
++            TvGatewayStore.getActiveTunerId(context));
++
++        controller.get().onNodeDestroyed(new NodeDestroyedEvent());
++        org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle();
++        String started = TvGatewayStore.getActiveTunerId(context);
++        if (started == null) {
++            java.lang.reflect.Field consent = TvHomeActivity.class.getDeclaredField("pendingConsent");
++            consent.setAccessible(true);
++            TvGatewayProfile requested = (TvGatewayProfile) consent.get(controller.get());
++            assertNotNull("Replacement must request VPN consent when Robolectric has not granted it", requested);
++            started = requested.getTunerId();
++        }
++        assertEquals("#5", started);
++    }
++    @Test public void staleSelectedProfileConnectsWithOneClickWhenServiceIsStopped() throws Exception {
++        TvGatewayStore.setActiveTunerId(context, "#5");
++        reopen();
++
++        card("#5").performClick();
++        org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle();
++
++        String started = TvGatewayStore.getActiveTunerId(context);
++        if (started == null) {
++            java.lang.reflect.Field consent = TvHomeActivity.class.getDeclaredField("pendingConsent");
++            consent.setAccessible(true);
++            TvGatewayProfile requested = (TvGatewayProfile) consent.get(controller.get());
++            assertNotNull("One click must initiate the stale profile instead of only clearing it", requested);
++            started = requested.getTunerId();
++        }
++        assertEquals("#5", started);
++    }
++    private static int count(View view, String tag) {
++        int result = tag.equals(view.getTag()) ? 1 : 0;
++        if(view instanceof ViewGroup) for(int i=0;i<((ViewGroup)view).getChildCount();i++) result+=count(((ViewGroup)view).getChildAt(i),tag);
++        return result;
++    }
++    private static void collect(View view, List<EditText> fields) {
++        if(view instanceof EditText) fields.add((EditText)view);
++        if(view instanceof ViewGroup) for(int i=0;i<((ViewGroup)view).getChildCount();i++) collect(((ViewGroup)view).getChildAt(i),fields);
++    }
++}
+diff --git a/app/src/test/java/net/kaaass/zerotierfix/ui/tv/TvRoutePolicyTest.java b/app/src/test/java/net/kaaass/zerotierfix/ui/tv/TvRoutePolicyTest.java
+index 88f542e..7f53695 100644
+--- a/app/src/test/java/net/kaaass/zerotierfix/ui/tv/TvRoutePolicyTest.java
++++ b/app/src/test/java/net/kaaass/zerotierfix/ui/tv/TvRoutePolicyTest.java
+@@ -1,6 +1,7 @@
+ package net.kaaass.zerotierfix.ui.tv;
+ 
+ import org.junit.Test;
++import java.net.InetAddress;
+ import static org.junit.Assert.*;
+ 
+ public class TvRoutePolicyTest {
+@@ -12,4 +13,15 @@ public class TvRoutePolicyTest {
+         assertFalse(TvRoutePolicy.disableIpv6(false, false));
+         assertTrue(TvRoutePolicy.disableIpv6(true, false));
+     }
++
++    @Test public void bypassesOnlyDirectPrivateUnderlyingLanRoute() throws Exception {
++        assertTrue(TvRoutePolicy.bypassUnderlyingIpv4(
++            InetAddress.getByName("192.168.1.0"), 24, false));
++        assertFalse(TvRoutePolicy.bypassUnderlyingIpv4(
++            InetAddress.getByName("0.0.0.0"), 0, true));
++        assertFalse(TvRoutePolicy.bypassUnderlyingIpv4(
++            InetAddress.getByName("8.8.8.0"), 24, false));
++        assertFalse(TvRoutePolicy.bypassUnderlyingIpv4(
++            InetAddress.getByName("192.168.1.0"), 24, true));
++    }
+ }

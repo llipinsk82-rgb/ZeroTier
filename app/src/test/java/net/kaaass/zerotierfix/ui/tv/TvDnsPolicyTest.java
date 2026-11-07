@@ -7,7 +7,7 @@ public class TvDnsPolicyTest {
     @Test public void verifiedTunersHaveIndependentLocalDns() {
         assertEquals("192.168.18.5", TvDnsPolicy.defaultDns("#5"));
         assertEquals("192.168.100.153", TvDnsPolicy.defaultDns("#9"));
-        assertNull(TvDnsPolicy.defaultDns("#23"));
+        assertEquals("194.204.152.34", TvDnsPolicy.defaultDns("#23"));
     }
 
     @Test public void unknownTunersNeverFallBackToPublicResolver() {

@@ -20,8 +20,8 @@ public class TvLauncherConfigurationTest {
         }
 
         assertNotNull("Tuner #23 must be visible after a clean install", tuner23);
-        assertEquals("a581878f7d6c0187", tuner23.getNetworkIdHex());
-        assertEquals("10.32.73.190", tuner23.getGatewayIpv4());
+        assertEquals("2c1ee692a07a5d21", tuner23.getNetworkIdHex());
+        assertEquals("192.168.111.1", tuner23.getGatewayIpv4());
         assertEquals("91.227.218.90", tuner23.getExpectedPublicIpv4());
     }
 

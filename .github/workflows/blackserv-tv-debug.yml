@@ -2,7 +2,7 @@ name: BlackServ TV debug APK
 
 on:
   push:
-    branches: [blackserv/clean-tv-v1]
+    branches: [blackserv/clean-tv-v1, blackserv/tv-v2-integration-20261107]
   workflow_dispatch:
 
 permissions:

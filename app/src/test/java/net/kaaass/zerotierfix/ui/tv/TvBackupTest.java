@@ -13,8 +13,8 @@ public class TvBackupTest {
         assertEquals("192.168.100.1", p.get(1).getGatewayIpv4());
         assertEquals("05b1a061a1000001", p.get(0).getNetworkIdHex());
         assertEquals("c0edc64972000001", p.get(1).getNetworkIdHex());
-        assertEquals("a581878f7d6c0187", p.get(2).getNetworkIdHex());
-        assertEquals("10.32.73.190", p.get(2).getGatewayIpv4());
+        assertEquals("2c1ee692a07a5d21", p.get(2).getNetworkIdHex());
+        assertEquals("192.168.111.1", p.get(2).getGatewayIpv4());
     }
     @Test public void roundTripPreservesProfilesDnsAndExclusions() throws Exception {
         var s = TvBackup.decode(valid());

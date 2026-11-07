@@ -100,9 +100,9 @@ public final class TvHomeActivity extends AppCompatActivity {
         TextView brand = text("BLACKSERV  /  ZEROTIER TV", 19, R.color.tv_focus, true);
         root.addView(brand);
 
-        TextView title = text("Wybierz polski tuner", 32, R.color.tv_text, true);
-        LinearLayout.LayoutParams titleMargin = verticalSpace(12);
-        root.addView(title, titleMargin);
+        
+        
+        
 
         summary = text("Brak aktywnego połączenia", 18, R.color.tv_muted, false);
         root.addView(summary, verticalSpace(4));
@@ -506,6 +506,25 @@ public final class TvHomeActivity extends AppCompatActivity {
         });
     }
 
+    private void showProfileActions(TvGatewayProfile chosen) {
+        new AlertDialog.Builder(this).setTitle(chosen.getTunerId() + " \u00b7 " + chosen.getDisplayName())
+            .setItems(new String[]{"Edytuj", "Duplikuj", "Usu\u0144"}, (dialog, action) -> {
+                if (action == 0) showProfileDialog(chosen.getTunerId(), chosen);
+                else if (action == 1) duplicateProfile(chosen);
+                else confirmDelete(chosen);
+            }).show();
+    }
+
+    private void duplicateProfile(TvGatewayProfile source) {
+        try {
+            TvGatewayStore.save(this, TvProfileEditor.duplicate(gateways, source));
+            refreshCards();
+            Toast.makeText(this, "Zduplikowano profil", Toast.LENGTH_SHORT).show();
+        } catch (IllegalArgumentException | IllegalStateException failure) {
+            showProblem(failure.getMessage());
+        }
+    }
+
     private void showAddDialog() { showProfileDialog("", null); }
 
     private void showProfileDialog(String slot, TvGatewayProfile existing) {
@@ -527,7 +546,7 @@ public final class TvHomeActivity extends AppCompatActivity {
             form.addView(field);
         }
         new AlertDialog.Builder(this)
-                .setTitle("Dodaj zweryfikowany tuner")
+                .setTitle(existing == null ? "Dodaj tuner" : "Edytuj tuner")
                 .setView(form)
                 .setNegativeButton("Anuluj", null)
                 .setPositiveButton("Zapisz", (dialog, which) -> {
@@ -536,14 +555,14 @@ public final class TvHomeActivity extends AppCompatActivity {
                                 id.getText().toString(), title.getText().toString(),
                                 nwid.getText().toString(), gateway.getText().toString(),
                                 expected.getText().toString());
-                        List<TvGatewayProfile> copy = new ArrayList<>(gateways);
-                        copy.removeIf(p -> p.getTunerId().equals(profile.getTunerId()));
-                        copy.add(profile);
-                        if (profile.getTunerId().equals(TvGatewayStore.getActiveTunerId(this))) disconnect();
+                        List<TvGatewayProfile> updated = TvProfileEditor.apply(gateways, existing, profile);
+                        boolean editedWasActive = existing != null
+                                && existing.getTunerId().equals(TvGatewayStore.getActiveTunerId(this));
+                        if (editedWasActive) disconnect();
                         TvNetworkStore.ensure(this, profile);
-                        TvGatewayStore.save(this, copy);
+                        TvGatewayStore.save(this, updated);
                         refreshCards();
-                    } catch (IllegalArgumentException invalid) {
+                    } catch (IllegalArgumentException | IllegalStateException invalid) {
                         Toast.makeText(this, invalid.getMessage(), Toast.LENGTH_LONG).show();
                     }
                 }).show();
@@ -566,7 +585,7 @@ public final class TvHomeActivity extends AppCompatActivity {
                     new AlertDialog.Builder(this).setTitle("Profile tunerów")
                         .setItems(names.toArray(new String[0]), (a, index) -> {
                             if (index == gateways.size()) showAddDialog();
-                            else showProfileDialog(gateways.get(index).getTunerId(), gateways.get(index));
+                            else showProfileActions(gateways.get(index));
                         }).show(); break;
                 case 1: startActivity(new Intent(this, TvBypassActivity.class)); break;
                 case 2: startActivity(new Intent(this, TvDiagnosticsActivity.class)); break;

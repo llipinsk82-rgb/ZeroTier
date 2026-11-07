@@ -266,7 +266,12 @@ public final class TvHomeActivity extends AppCompatActivity {
             disconnect();
             return;
         }
-        TvNetworkStore.ensure(this, profile);
+        try {
+            TvNetworkStore.ensure(this, profile);
+        } catch (IllegalArgumentException | IllegalStateException dnsError) {
+            showProblem("Połączenie wstrzymane: " + dnsError.getMessage());
+            return;
+        }
         Intent approval = VpnService.prepare(this);
         if (approval != null) {
             pendingConsent = profile;
@@ -573,6 +578,35 @@ public final class TvHomeActivity extends AppCompatActivity {
         new AlertDialog.Builder(this).setTitle("Nie wykonano operacji").setMessage(message)
             .setPositiveButton("Zamknij", null).show();
     }
+    private void showDnsProfilePicker() {
+        List<String> names = new ArrayList<>();
+        for (TvGatewayProfile p : gateways) names.add(p.getTunerId() + " · " + p.getDisplayName());
+        new AlertDialog.Builder(this).setTitle("DNS tunera — bez publicznego fallbacku")
+                .setItems(names.toArray(new String[0]), (dialog, index) -> showDnsEditor(gateways.get(index)))
+                .show();
+    }
+
+    private void showDnsEditor(TvGatewayProfile profile) {
+        String key = "blackserv_tv_dns_profile_" + profile.getTunerId();
+        var prefs = android.preference.PreferenceManager.getDefaultSharedPreferences(this);
+        String defaultDns = TvDnsPolicy.defaultDns(profile.getTunerId());
+        EditText input = input("Lokalny DNS tunera (IPv4 lub IPv6)");
+        input.setText(prefs.getString(key, defaultDns == null ? "" : defaultDns));
+        new AlertDialog.Builder(this).setTitle("DNS " + profile.getDisplayName()).setView(input)
+                .setNegativeButton("Anuluj", null)
+                .setPositiveButton("Zapisz", (dialog, which) -> {
+                    try {
+                        String dns = TvDnsPolicy.validate(input.getText().toString());
+                        prefs.edit().putString(key, dns).apply();
+                        if (profile.getTunerId().equals(TvGatewayStore.getActiveTunerId(this))) {
+                            showProblem("DNS zapisany. Rozłącz i połącz ponownie, aby uaktywnić nowy serwer.");
+                        }
+                    } catch (IllegalArgumentException invalid) {
+                        showProblem(invalid.getMessage());
+                    }
+                }).show();
+    }
+
     private void showSettings() {
         String[] options = {"Profile tunerów", "Aplikacje bez VPN", "Diagnostyka", "DNS",
             "Uruchamianie po restarcie", "Eksport ustawień JSON", "Import ustawień JSON"};
@@ -589,17 +623,7 @@ public final class TvHomeActivity extends AppCompatActivity {
                         }).show(); break;
                 case 1: startActivity(new Intent(this, TvBypassActivity.class)); break;
                 case 2: startActivity(new Intent(this, TvDiagnosticsActivity.class)); break;
-                case 3:
-                    EditText dns = input("DNS oddzielone przecinkami"); dns.setText(TvNetworkSettings.dns(this));
-                    new AlertDialog.Builder(this).setTitle("DNS przez VPN").setView(dns)
-                        .setNegativeButton("Anuluj", null).setPositiveButton("Zapisz", (a,b) -> {
-                            try {
-                                String value = String.join(",", TvNetworkSettings.parseDns(dns.getText().toString()));
-                                android.preference.PreferenceManager.getDefaultSharedPreferences(this).edit()
-                                    .putString(TvNetworkSettings.DNS, value).apply();
-                                Toast.makeText(this, "Zapisano. Połącz VPN ponownie.", Toast.LENGTH_LONG).show();
-                            } catch (IllegalArgumentException error) { showProblem(error.getMessage()); }
-                        }).show(); break;
+                case 3: showDnsProfilePicker(); break;
                 case 4:
                     var prefs = android.preference.PreferenceManager.getDefaultSharedPreferences(this);
                     boolean boot = prefs.getBoolean(TvNetworkSettings.BOOT, false);

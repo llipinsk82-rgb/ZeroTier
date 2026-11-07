@@ -602,7 +602,17 @@ public final class TvHomeActivity extends AppCompatActivity {
                         boolean editedWasActive = existing != null
                                 && existing.getTunerId().equals(TvGatewayStore.getActiveTunerId(this));
                         if (editedWasActive) disconnect();
-                        TvNetworkStore.ensure(this, profile);
+                        if (existing != null && !existing.getTunerId().equals(profile.getTunerId())) {
+                            var preferences = android.preference.PreferenceManager.getDefaultSharedPreferences(this);
+                            String oldKey = "blackserv_tv_dns_profile_" + existing.getTunerId();
+                            String oldDns = preferences.getString(oldKey,
+                                    TvDnsPolicy.defaultDns(existing.getTunerId()));
+                            if (oldDns != null) {
+                                preferences.edit()
+                                        .putString("blackserv_tv_dns_profile_" + profile.getTunerId(), oldDns)
+                                        .remove(oldKey).apply();
+                            }
+                        }
                         TvGatewayStore.save(this, updated);
                         refreshCards();
                     } catch (IllegalArgumentException | IllegalStateException invalid) {

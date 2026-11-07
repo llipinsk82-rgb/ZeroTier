@@ -23,10 +23,9 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
-      - name: Prepare Android SDK
-        uses: android-actions/setup-android@v3
       - name: Install pinned Android components
         run: |
+          echo "ANDROID_HOME=$ANDROID_HOME"
           yes | sdkmanager --licenses > /dev/null || true
           sdkmanager "platforms;android-33" "build-tools;33.0.2" "ndk;23.1.7779620"
       - name: Verify unit tests and compile debug APK

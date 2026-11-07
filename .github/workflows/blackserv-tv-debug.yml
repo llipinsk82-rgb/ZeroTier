@@ -2,8 +2,7 @@ name: BlackServ TV debug APK
 
 on:
   push:
-    branches:
-      - blackserv/clean-tv-v1
+    branches: [blackserv/clean-tv-v1]
   workflow_dispatch:
 
 permissions:
@@ -24,10 +23,13 @@ jobs:
           distribution: temurin
           java-version: '17'
       - name: Install pinned Android components
+        shell: bash
         run: |
-          echo "ANDROID_HOME=$ANDROID_HOME"
-          yes | sdkmanager --licenses > /dev/null || true
-          sdkmanager "platforms;android-33" "build-tools;33.0.2" "ndk;23.1.7779620"
+          set -euo pipefail
+          SDKMANAGER=$(find "$ANDROID_HOME/cmdline-tools" -type f -name sdkmanager | head -n 1)
+          test -n "$SDKMANAGER"
+          yes | "$SDKMANAGER" --licenses > /dev/null || true
+          "$SDKMANAGER" "platforms;android-33" "build-tools;33.0.2" "ndk;23.1.7779620"
       - name: Verify unit tests and compile debug APK
         run: |
           chmod +x ./gradlew

@@ -266,6 +266,10 @@ public class ZeroTierOneService extends VpnService implements Runnable, EventLis
     public int onStartCommand(Intent intent, int flags, int startId) {
         long networkId;
         Log.d(TAG, "onStartCommand");
+        // Android 8+ requires a service started via startForegroundService()
+        // to promote itself immediately, even while ZeroTier is still joining
+        // or an early validation path returns without creating the VPN socket.
+        startPendingNotification();
         if (startId == 3) {
             Log.i(TAG, "Authorizing VPN");
             return START_NOT_STICKY;
@@ -419,6 +423,25 @@ public class ZeroTierOneService extends VpnService implements Runnable, EventLis
         }
         joinNetwork(networkId);
         return START_STICKY;
+    }
+
+    private void startPendingNotification() {
+        if (this.notificationManager == null) {
+            this.notificationManager = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
+        }
+        if (Build.VERSION.SDK_INT >= 26) {
+            NotificationChannel channel = new NotificationChannel(
+                    Constants.CHANNEL_ID, getString(R.string.channel_name),
+                    NotificationManager.IMPORTANCE_LOW);
+            this.notificationManager.createNotificationChannel(channel);
+        }
+        var notification = new NotificationCompat.Builder(this, Constants.CHANNEL_ID)
+                .setSmallIcon(R.mipmap.ic_launcher)
+                .setOngoing(true)
+                .setContentTitle(getString(R.string.notification_title_connected))
+                .setContentText("ZeroTier: connecting")
+                .build();
+        startForeground(ZT_NOTIFICATION_TAG, notification);
     }
 
     public void stopZeroTier() {

@@ -5,6 +5,8 @@ import android.content.Intent;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.net.VpnService;
+import android.net.ConnectivityManager;
+import android.net.NetworkInfo;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
@@ -72,9 +74,12 @@ public final class TvHomeActivity extends AppCompatActivity {
             events.post(new IsServiceRunningRequestEvent());
             events.post(new NetworkListRequestEvent());
             maybeProbeExit();
+            maybeReconnect();
             uiHandler.postDelayed(this, 7000);
         }
     };
+    private int reconnectFailures;
+    private long nextReconnectAtMs;
     private boolean tvResumed;
     private boolean exitVerified;
     private boolean probeInProgress;
@@ -295,6 +300,38 @@ public final class TvHomeActivity extends AppCompatActivity {
         render();
     }
 
+    /** Reconnect only a previously selected profile, with explicit VPN consent. */
+    private void maybeReconnect() {
+        if (!tvResumed || serviceRunning || pendingSwitch != null) return;
+        String activeId = TvGatewayStore.getActiveTunerId(this);
+        if (activeId == null) return;
+        if (verificationProblem != null
+                && (verificationProblem.contains("ACCESS_DENIED")
+                    || verificationProblem.contains("NOT_FOUND"))) return;
+        TvGatewayProfile active = null;
+        for (TvGatewayProfile p : TvGatewayStore.load(this)) {
+            if (p.getTunerId().equals(activeId)) { active = p; break; }
+        }
+        if (active == null) return;
+        ConnectivityManager manager = (ConnectivityManager) getSystemService(CONNECTIVITY_SERVICE);
+        NetworkInfo info = manager == null ? null : manager.getActiveNetworkInfo();
+        boolean online = info != null && info.isConnected();
+        if (!TvReconnectPolicy.canReconnect(true, online, VpnService.prepare(this) == null)) return;
+        long now = SystemClock.uptimeMillis();
+        if (now < nextReconnectAtMs) return;
+        nextReconnectAtMs = now + TvReconnectPolicy.delayMs(reconnectFailures++);
+        try {
+            TvNetworkStore.ensure(this, active);
+            Intent start = new Intent(this, ZeroTierOneService.class);
+            start.putExtra(ZeroTierOneService.ZT1_NETWORK_ID, active.getNetworkId());
+            ContextCompat.startForegroundService(this, start);
+        } catch (IllegalArgumentException | IllegalStateException problem) {
+            verificationProblem = "Auto-reconnect: " + problem.getMessage();
+            connectionError = true;
+            render();
+        }
+    }
+
     private void disconnect() {
         exitSession.clear();
         resetExitVerification();
@@ -360,6 +397,7 @@ public final class TvHomeActivity extends AppCompatActivity {
             render();
         }
         maybeProbeExit();
+        if (running) { reconnectFailures = 0; nextReconnectAtMs = 0; }
     }
 
     @Subscribe(threadMode = ThreadMode.MAIN)

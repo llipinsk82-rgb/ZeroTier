@@ -674,7 +674,7 @@ public final class TvHomeActivity extends AppCompatActivity {
                 case 3: showDnsProfilePicker(); break;
                 case 4:
                     var prefs = android.preference.PreferenceManager.getDefaultSharedPreferences(this);
-                    boolean boot = prefs.getBoolean(TvNetworkSettings.BOOT, false);
+                    boolean boot = prefs.getBoolean(TvNetworkSettings.BOOT, true);
                     new AlertDialog.Builder(this).setTitle("Po restarcie")
                         .setSingleChoiceItems(new String[]{"Nie łącz automatycznie", "Przywróć ostatnio aktywny profil"}, boot ? 1 : 0,
                             (a,index) -> { prefs.edit().putBoolean(TvNetworkSettings.BOOT, index == 1).apply(); a.dismiss(); }).show(); break;

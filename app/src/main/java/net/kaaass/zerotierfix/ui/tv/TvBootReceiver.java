@@ -25,7 +25,7 @@ public final class TvBootReceiver extends BroadcastReceiver {
         if (!Intent.ACTION_BOOT_COMPLETED.equals(action)
                 && !Intent.ACTION_MY_PACKAGE_REPLACED.equals(action)) return;
         if (!PreferenceManager.getDefaultSharedPreferences(context)
-                .getBoolean(TvNetworkSettings.BOOT, false)) return;
+                .getBoolean(TvNetworkSettings.BOOT, true)) return;
         String selected = TvGatewayStore.getActiveTunerId(context);
         if (selected == null || VpnService.prepare(context) != null) return;
         ConnectivityManager manager =

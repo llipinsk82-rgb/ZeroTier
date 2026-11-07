@@ -1,7 +1,14 @@
 package net.kaaass.zerotierfix.ui.tv;
 import org.junit.Test;
+import org.junit.runner.RunWith;
+import org.robolectric.RobolectricTestRunner;
+import org.robolectric.RuntimeEnvironment;
+import org.robolectric.annotation.Config;
+import android.preference.PreferenceManager;
 import java.util.Collections;
 import static org.junit.Assert.*;
+@RunWith(RobolectricTestRunner.class)
+@Config(sdk = 28)
 public class TvBackupTest {
     private String valid() throws Exception {
         return TvBackup.encode(Collections.singletonList(new TvGatewayProfile("#5", "Zażółć — Polska", "0123456789abcdef", "10.1.1.1", "91.1.2.3")),
@@ -31,6 +38,17 @@ public class TvBackupTest {
         var restored = TvBackup.decode(backup.toString());
         assertEquals("192.168.18.5", restored.dnsByTuner.get("#5"));
         assertFalse(restored.dnsByTuner.containsKey("#9"));
+    }
+
+    @Test public void restoringBackupClearsOldProfileDnsOverrides() throws Exception {
+        var context = RuntimeEnvironment.getApplication();
+        var prefs = PreferenceManager.getDefaultSharedPreferences(context);
+        prefs.edit().clear()
+                .putString("blackserv_tv_dns_profile_#9", "8.8.8.8")
+                .commit();
+        TvBackup.restore(context, TvBackup.decode(valid()));
+        assertFalse("DNS from removed profile must not survive import",
+                prefs.contains("blackserv_tv_dns_profile_#9"));
     }
 
     @Test public void emptySelectionRemainsEmpty() throws Exception {

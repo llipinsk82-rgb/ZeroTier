@@ -15,8 +15,8 @@ android {
         applicationId "uk.blackserv.zerotiertv"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 1
-        versionName "1.0.0-tv-alpha"
+        versionCode 21
+        versionName "2.0.0-tv-beta.1"
         multiDexEnabled true
 
         testInstrumentationRunner 'androidx.test.runner.AndroidJUnitRunner'

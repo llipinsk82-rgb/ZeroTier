@@ -5,6 +5,10 @@ import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.content.Context;
 import android.content.Intent;
+import android.net.ConnectivityManager;
+import android.net.IpPrefix;
+import android.net.LinkProperties;
+import android.net.RouteInfo;
 import android.net.VpnService;
 import android.os.Binder;
 import android.os.Build;
@@ -55,6 +59,10 @@ import net.kaaass.zerotierfix.model.Network;
 import net.kaaass.zerotierfix.model.NetworkDao;
 import net.kaaass.zerotierfix.model.type.DNSMode;
 import net.kaaass.zerotierfix.ui.NetworkListActivity;
+import net.kaaass.zerotierfix.ui.tv.TvGatewayProfile;
+import net.kaaass.zerotierfix.ui.tv.TvGatewaySelection;
+import net.kaaass.zerotierfix.ui.tv.TvGatewayStore;
+import net.kaaass.zerotierfix.ui.tv.TvRoutePolicy;
 import net.kaaass.zerotierfix.util.Constants;
 import net.kaaass.zerotierfix.util.DatabaseUtils;
 import net.kaaass.zerotierfix.util.InetAddressUtils;
@@ -85,7 +93,6 @@ public class ZeroTierOneService extends VpnService implements Runnable, EventLis
     public static final int MSG_LEAVE_NETWORK = 2;
     public static final String ZT1_NETWORK_ID = "com.zerotier.one.network_id";
     public static final String ZT1_USE_DEFAULT_ROUTE = "com.zerotier.one.use_default_route";
-    private static final String[] DISALLOWED_APPS = {"com.android.vending"};
     private static final String TAG = "ZT1_Service";
     private static final int ZT_NOTIFICATION_TAG = 5919812;
     private final IBinder mBinder = new ZeroTierBinder();
@@ -96,6 +103,55 @@ public class ZeroTierOneService extends VpnService implements Runnable, EventLis
     FileOutputStream out;
     DatagramSocket svrSocket;
     ParcelFileDescriptor vpnSocket;
+    private final android.os.Handler healthHandler = new android.os.Handler(android.os.Looper.getMainLooper());
+    private final java.util.concurrent.ExecutorService healthWorker = java.util.concurrent.Executors.newSingleThreadExecutor();
+    private volatile boolean stopping;
+    private int healthFailures;
+    private long healthGeneration;
+    private final Runnable healthCheck = new Runnable() {
+        @Override public void run() {
+            if (stopping) return;
+            final long generation = healthGeneration;
+            healthWorker.execute(() -> {
+                String failure = null;
+                try {
+                    if (vpnSocket == null) throw new java.io.IOException("Brak adresu lub autoryzacji ZeroTier");
+                    String ip = net.kaaass.zerotierfix.ui.tv.TvExitProbe.fetchPublicIpv4();
+                    if (!org.apache.commons.validator.routines.InetAddressValidator.getInstance().isValidInet4Address(ip))
+                        throw new java.io.IOException("Nieprawidłowa odpowiedź testu internetu");
+                    for (TvGatewayProfile p : TvGatewayStore.load(ZeroTierOneService.this)) {
+                        if (p.getTunerId().equals(TvGatewayStore.getActiveTunerId(ZeroTierOneService.this))
+                                && p.getExpectedPublicIpv4() != null && !ip.equals(p.getExpectedPublicIpv4()))
+                            throw new java.io.IOException("Publiczny IP nie odpowiada wybranej bramie");
+                    }
+                } catch (Exception error) { failure = error.getMessage(); }
+                final String problem = failure;
+                healthHandler.post(() -> {
+                    if (stopping || generation != healthGeneration) return;
+                    healthFailures = problem == null ? 0 : healthFailures + 1;
+                    if (healthFailures >= 3) {
+                        PreferenceManager.getDefaultSharedPreferences(ZeroTierOneService.this).edit()
+                            .putString("blackserv_tv_last_error", problem + ". Zatrzymywanie VPN.").apply();
+                        eventBus.post(new VPNErrorEvent(problem));
+                        stopSelf();
+                    } else healthHandler.postDelayed(healthCheck, 20000);
+                });
+            });
+        }
+    };
+
+    private void foregroundStarting() {
+        notificationManager = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
+        if (Build.VERSION.SDK_INT >= 26) notificationManager.createNotificationChannel(
+            new NotificationChannel(Constants.CHANNEL_ID, "BlackServ VPN", NotificationManager.IMPORTANCE_LOW));
+        Intent open = new Intent(this, net.kaaass.zerotierfix.ui.tv.TvHomeActivity.class);
+        int flags = PendingIntent.FLAG_UPDATE_CURRENT;
+        if (Build.VERSION.SDK_INT >= 23) flags |= PendingIntent.FLAG_IMMUTABLE;
+        startForeground(ZT_NOTIFICATION_TAG, new NotificationCompat.Builder(this, Constants.CHANNEL_ID)
+            .setSmallIcon(R.drawable.tv_banner).setContentTitle("BlackServ VPN")
+            .setContentText("Łączenie z ZeroTier…").setOngoing(true)
+            .setContentIntent(PendingIntent.getActivity(this, 0, open, flags)).build());
+    }
     private int bindCount = 0;
     private boolean disableIPv6 = false;
     private int mStartID = -1;
@@ -266,14 +322,14 @@ public class ZeroTierOneService extends VpnService implements Runnable, EventLis
     public int onStartCommand(Intent intent, int flags, int startId) {
         long networkId;
         Log.d(TAG, "onStartCommand");
-        if (startId == 3) {
-            Log.i(TAG, "Authorizing VPN");
-            return START_NOT_STICKY;
-        } else if (intent == null) {
-            Log.e(TAG, "NULL intent.  Cannot start");
-            return START_NOT_STICKY;
-        }
         this.mStartID = startId;
+        foregroundStarting();
+        if (intent == null) intent = new Intent();
+        stopping = false;
+        healthFailures = 0;
+        healthGeneration++;
+        healthHandler.removeCallbacks(healthCheck);
+        healthHandler.postDelayed(healthCheck, 20000);
 
         // 注册事件总线监听器
         if (!this.eventBus.isRegistered(this)) {
@@ -285,29 +341,14 @@ public class ZeroTierOneService extends VpnService implements Runnable, EventLis
             // Intent 中指定了目标网络，直接使用此 ID
             networkId = intent.getLongExtra(ZT1_NETWORK_ID, 0);
         } else {
-            // 默认启用最近一次启动的网络
-            DatabaseUtils.readLock.lock();
+            networkId = 0;
+            String activeId = TvGatewayStore.getActiveTunerId(this);
             try {
-                var daoSession = ((ZerotierFixApplication) getApplication()).getDaoSession();
-                daoSession.clear();
-                var lastActivatedNetworks = daoSession.getNetworkDao().queryBuilder()
-                        .where(NetworkDao.Properties.LastActivated.eq(true))
-                        .list();
-                if (lastActivatedNetworks == null || lastActivatedNetworks.isEmpty()) {
-                    Log.e(TAG, "Couldn't find last activated connection");
-                    return START_NOT_STICKY;
-                } else if (lastActivatedNetworks.size() > 1) {
-                    Log.e(TAG, "Multiple networks marked as last connected: " + lastActivatedNetworks.size());
-                    for (Network network : lastActivatedNetworks) {
-                        Log.e(TAG, "ID: " + Long.toHexString(network.getNetworkId()));
-                    }
-                    throw new IllegalStateException("Database is inconsistent");
-                } else {
-                    networkId = lastActivatedNetworks.get(0).getNetworkId();
-                    Log.i(TAG, "Got Always On request for ZeroTier");
+                for (TvGatewayProfile p : TvGatewayStore.load(this)) {
+                    if (p.getTunerId().equals(activeId)) { networkId = p.getNetworkId(); break; }
                 }
-            } finally {
-                DatabaseUtils.readLock.unlock();
+            } catch (IllegalArgumentException invalid) {
+                this.eventBus.post(new VPNErrorEvent("Nieprawidłowy profil autostartu"));
             }
         }
         if (networkId == 0) {
@@ -326,8 +367,8 @@ public class ZeroTierOneService extends VpnService implements Runnable, EventLis
         if (currentNetworkInfo == NetworkInfoUtils.CurrentConnection.CONNECTION_NONE) {
             // 未连接网络
             Toast.makeText(this, R.string.toast_no_network, Toast.LENGTH_SHORT).show();
-            stopSelf(this.mStartID);
-            return START_NOT_STICKY;
+            // The native engine retries while Wi-Fi comes up after boot.
+            // The bounded health monitor releases the VPN if connectivity never recovers.
         } else if (currentNetworkInfo == NetworkInfoUtils.CurrentConnection.CONNECTION_MOBILE &&
                 !useCellularData) {
             // 使用移动网络，但未在设置中允许移动网络访问
@@ -347,7 +388,7 @@ public class ZeroTierOneService extends VpnService implements Runnable, EventLis
                     this.svrSocket.bind(new InetSocketAddress(9994));
                 }
                 if (!protect(this.svrSocket)) {
-                    Log.e(TAG, "Error protecting UDP socket from feedback loop.");
+                    throw new java.io.IOException("Cannot protect ZeroTier UDP socket");
                 }
 
                 // 创建本地节点
@@ -364,6 +405,7 @@ public class ZeroTierOneService extends VpnService implements Runnable, EventLis
                         Log.d(TAG, "ZeroTierOne Node Initialized");
                     } else {
                         Log.e(TAG, "Error starting ZT1 Node: " + result);
+                        stopSelf(startId);
                         return START_NOT_STICKY;
                     }
                     this.onNodeStatusRequest(null);
@@ -414,6 +456,7 @@ public class ZeroTierOneService extends VpnService implements Runnable, EventLis
                 }
             } catch (Exception e) {
                 Log.e(TAG, e.toString(), e);
+                stopSelf(startId);
                 return START_NOT_STICKY;
             }
         }
@@ -422,6 +465,19 @@ public class ZeroTierOneService extends VpnService implements Runnable, EventLis
     }
 
     public void stopZeroTier() {
+        if (android.os.Looper.myLooper() != android.os.Looper.getMainLooper()) {
+            healthHandler.post(this::stopSelf);
+            return;
+        }
+        stopping = true;
+        healthGeneration++;
+        healthHandler.removeCallbacks(healthCheck);
+        // Release the OS route before joining native/IO threads, including error paths.
+        if (vpnSocket != null) {
+            try { vpnSocket.close(); } catch (java.io.IOException ignored) { }
+            vpnSocket = null;
+        }
+        stopForeground(true);
         if (this.svrSocket != null) {
             this.svrSocket.close();
             this.svrSocket = null;
@@ -508,11 +564,14 @@ public class ZeroTierOneService extends VpnService implements Runnable, EventLis
         } catch (Exception e) {
             Log.e(TAG, e.toString(), e);
         } finally {
+            healthWorker.shutdownNow();
             super.onDestroy();
         }
     }
 
     public void onRevoke() {
+        PreferenceManager.getDefaultSharedPreferences(this).edit()
+            .putString("blackserv_tv_last_error", "Zgoda VPN cofnięta lub uruchomiono inny VPN.").apply();
         stopZeroTier();
         if (this.vpnSocket != null) {
             try {
@@ -571,7 +630,7 @@ public class ZeroTierOneService extends VpnService implements Runnable, EventLis
 
     @Subscribe(threadMode = ThreadMode.POSTING)
     public void onIsServiceRunningRequest(IsServiceRunningRequestEvent event) {
-        this.eventBus.post(new IsServiceRunningReplyEvent(true));
+        this.eventBus.post(new IsServiceRunningReplyEvent(!stopping && node != null));
     }
 
     /**
@@ -699,7 +758,7 @@ public class ZeroTierOneService extends VpnService implements Runnable, EventLis
     public void onEvent(Event event) {
         Log.d(TAG, "Event: " + event.toString());
         // 更新节点状态
-        if (this.node.isInited()) {
+        if (this.node != null && this.node.isInited()) {
             this.eventBus.post(new NodeStatusEvent(this.node.status(), this.node.getVersion()));
         }
     }
@@ -815,7 +874,31 @@ public class ZeroTierOneService extends VpnService implements Runnable, EventLis
         var builder = new VpnService.Builder();
         var assignedAddresses = virtualNetworkConfig.getAssignedAddresses();
         Log.i(TAG, "address length: " + assignedAddresses.length);
-        boolean isRouteViaZeroTier = networkConfig.getRouteViaZeroTier();
+        TvGatewayProfile selectedGatewayProfile;
+        try {
+            selectedGatewayProfile = TvGatewaySelection.find(
+                    TvGatewayStore.load(this),
+                    TvGatewayStore.getActiveTunerId(this), networkId);
+        } catch (IllegalArgumentException invalidConfiguration) {
+            Log.e(TAG, "Invalid TV gateway configuration", invalidConfiguration);
+            this.eventBus.post(new VPNErrorEvent("Invalid TV gateway configuration"));
+            return false;
+        }
+        InetAddress selectedGatewayIp = null;
+        if (selectedGatewayProfile != null) {
+            try {
+                selectedGatewayIp = InetAddress.getByName(
+                        selectedGatewayProfile.getGatewayIpv4());
+            } catch (Exception invalidAddress) {
+                Log.e(TAG, "Invalid ZeroTier gateway address", invalidAddress);
+                this.eventBus.post(new VPNErrorEvent("Invalid TV gateway address"));
+                return false;
+            }
+        }
+        boolean isRouteViaZeroTier = networkConfig.getRouteViaZeroTier()
+                || selectedGatewayIp != null;
+        this.disableIPv6 = TvRoutePolicy.disableIpv6(this.disableIPv6,
+                selectedGatewayIp != null);
 
         // 遍历 ZT 网络中当前设备的 IP 地址，组播配置
         for (var vpnAddress : assignedAddresses) {
@@ -864,6 +947,7 @@ public class ZeroTierOneService extends VpnService implements Runnable, EventLis
         try {
             var v4Loopback = InetAddress.getByName("0.0.0.0");
             var v6Loopback = InetAddress.getByName("::");
+            boolean selectedDefaultRouteAdded = false;
             if (virtualNetworkConfig.getRoutes().length > 0) {
                 for (var routeConfig : virtualNetworkConfig.getRoutes()) {
                     var target = routeConfig.getTarget();
@@ -881,12 +965,24 @@ public class ZeroTierOneService extends VpnService implements Runnable, EventLis
                     if (!isDisabledV6Route && shouldRouteToZerotier) {
                         builder.addRoute(viaAddress, targetPort);
                         Route route = new Route(viaAddress, targetPort);
-                        if (via != null) {
+                        if (selectedGatewayIp != null
+                                && targetAddress instanceof Inet4Address
+                                && targetPort == 0) {
+                            route.setGateway(selectedGatewayIp);
+                            selectedDefaultRouteAdded = true;
+                        } else if (via != null) {
                             route.setGateway(via.getAddress());
                         }
                         this.tunTapAdapter.addRouteAndNetwork(route, networkId);
                     }
                 }
+            }
+            if (selectedGatewayIp != null && !selectedDefaultRouteAdded) {
+                InetAddress defaultIpv4 = InetAddress.getByName("0.0.0.0");
+                builder.addRoute(defaultIpv4, 0);
+                Route defaultRoute = new Route(defaultIpv4, 0);
+                defaultRoute.setGateway(selectedGatewayIp);
+                this.tunTapAdapter.addRouteAndNetwork(defaultRoute, networkId);
             }
             builder.addRoute(InetAddress.getByName("224.0.0.0"), 4);
         } catch (Exception e) {
@@ -894,10 +990,41 @@ public class ZeroTierOneService extends VpnService implements Runnable, EventLis
             return false;
         }
 
+        if (Build.VERSION.SDK_INT >= 33) {
+            ConnectivityManager connectivity = getSystemService(ConnectivityManager.class);
+            LinkProperties underlying = connectivity == null ? null
+                    : connectivity.getLinkProperties(connectivity.getActiveNetwork());
+            if (underlying != null) {
+                for (RouteInfo route : underlying.getRoutes()) {
+                    IpPrefix destination = route.getDestination();
+                    if (destination != null && TvRoutePolicy.bypassUnderlyingIpv4(
+                            destination.getAddress(), destination.getPrefixLength(),
+                            route.hasGateway())) {
+                        builder.excludeRoute(destination);
+                        Log.i(TAG, "Keeping underlying LAN outside VPN: " + destination);
+                    }
+                }
+            }
+        }
+
         if (Build.VERSION.SDK_INT >= 29) {
             builder.setMetered(false);
         }
-        addDNSServers(builder, network);
+        if (selectedGatewayIp != null) {
+            boolean hasIpv4Dns = false;
+            for (String dns : net.kaaass.zerotierfix.ui.tv.TvNetworkSettings.parseDns(
+                    net.kaaass.zerotierfix.ui.tv.TvNetworkSettings.dns(this))) {
+                InetAddress address;
+                try { address = InetAddress.getByName(dns); }
+                catch (java.net.UnknownHostException badDns) { return false; }
+                if (address instanceof Inet4Address) { builder.addDnsServer(address); hasIpv4Dns = true; }
+                else if (!disableIPv6) builder.addDnsServer(address);
+            }
+            if (!hasIpv4Dns && disableIPv6) {
+                eventBus.post(new VPNErrorEvent("Brama IPv4 wymaga DNS IPv4"));
+                return false;
+            }
+        } else addDNSServers(builder, network);
 
         // 配置 MTU
         int mtu = virtualNetworkConfig.getMtu();
@@ -911,12 +1038,15 @@ public class ZeroTierOneService extends VpnService implements Runnable, EventLis
         builder.setSession(Constants.VPN_SESSION_NAME);
 
         // 设置部分 APP 不经过 VPN
-        if (!isRouteViaZeroTier && Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-            for (var app : DISALLOWED_APPS) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+            String storedExclusions = PreferenceManager.getDefaultSharedPreferences(this)
+                    .getString(VpnBypassConfig.PREF_KEY, null);
+            for (String app : VpnBypassConfig.parse(storedExclusions)) {
+                if (app.equals(getPackageName())) continue;
                 try {
                     builder.addDisallowedApplication(app);
-                } catch (Exception e3) {
-                    Log.e(TAG, "Cannot disallow app", e3);
+                } catch (Exception exception) {
+                    Log.w(TAG, "Could not exclude an unavailable app from VPN", exception);
                 }
             }
         }
@@ -951,7 +1081,7 @@ public class ZeroTierOneService extends VpnService implements Runnable, EventLis
         }
         var pendingIntent =
                 PendingIntent.getActivity(this, 0,
-                        new Intent(this, NetworkListActivity.class)
+                        new Intent(this, net.kaaass.zerotierfix.ui.tv.TvHomeActivity.class)
                                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP
                                         | Intent.FLAG_ACTIVITY_CLEAR_TOP)
                         , pendingIntentFlag);
@@ -959,7 +1089,7 @@ public class ZeroTierOneService extends VpnService implements Runnable, EventLis
                 .setPriority(1)
                 .setOngoing(true)
                 .setSmallIcon(R.mipmap.ic_launcher)
-                .setContentTitle(getString(R.string.notification_title_connected))
+                .setContentTitle("BlackServ VPN — sieć ZeroTier aktywna")
                 .setContentText(getString(R.string.notification_text_connected, network.getNetworkIdStr()))
                 .setColor(ContextCompat.getColor(getApplicationContext(), R.color.zerotier_orange))
                 .setContentIntent(pendingIntent).build();

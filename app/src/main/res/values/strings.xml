@@ -1,5 +1,6 @@
 <resources>
-    <string name="app_name">Zerotier Fix</string>
+    <string name="app_name">BlackServ ZeroTier TV</string>
+    <string name="tv_app_name" translatable="false">BlackServ ZeroTier TV</string>
 
     <string name="button_connect">Connect</string>
     <string name="button_disconnect">Disconnect</string>

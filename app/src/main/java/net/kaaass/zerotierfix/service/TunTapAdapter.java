@@ -487,23 +487,15 @@ public class TunTapAdapter implements VirtualNetworkFrameListener {
 
     private Route routeForDestination(InetAddress destAddress) {
         synchronized (this.routeMap) {
-            for (var route : this.routeMap.keySet()) {
-                if (route.belongsToRoute(destAddress)) {
-                    return route;
-                }
-            }
-            return null;
+            return RouteSelection.longestMatch(this.routeMap.keySet(),
+                    route -> route.belongsToRoute(destAddress), Route::getPrefix);
         }
     }
 
     private long networkIdForDestination(InetAddress destAddress) {
         synchronized (this.routeMap) {
-            for (Route route : this.routeMap.keySet()) {
-                if (route.belongsToRoute(destAddress)) {
-                    return this.routeMap.get(route);
-                }
-            }
-            return 0;
+            Route route = routeForDestination(destAddress);
+            return route == null ? 0 : this.routeMap.get(route);
         }
     }
 }

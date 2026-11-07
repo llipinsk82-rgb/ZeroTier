@@ -3,22 +3,31 @@ package net.kaaass.zerotierfix.service;
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
+import android.net.VpnService;
 import android.preference.PreferenceManager;
-import android.util.Log;
+import androidx.core.content.ContextCompat;
+import net.kaaass.zerotierfix.ui.tv.TvGatewayStore;
+import net.kaaass.zerotierfix.ui.tv.TvNetworkSettings;
 
-import net.kaaass.zerotierfix.util.Constants;
-
-// TODO: clear up
+/** Boot restores only a previously selected profile and previously granted VPN consent. */
 public class StartupReceiver extends BroadcastReceiver {
-    private static final String TAG = "StartupReceiver";
-
-    public void onReceive(Context context, Intent intent) {
-        Log.i(TAG, "Received: " + intent.getAction() + ". Starting ZeroTier One service.");
-        var pref = PreferenceManager.getDefaultSharedPreferences(context);
-        if (pref.getBoolean(Constants.PREF_GENERAL_START_ZEROTIER_ON_BOOT, true)) {
-            Log.i(TAG, "Preferences set to start ZeroTier on boot");
-        } else {
-            Log.i(TAG, "Preferences set to not start ZeroTier on boot");
+    @Override public void onReceive(Context context, Intent intent) {
+        if (!Intent.ACTION_BOOT_COMPLETED.equals(intent.getAction())) return;
+        if (!PreferenceManager.getDefaultSharedPreferences(context).getBoolean(TvNetworkSettings.BOOT, false)
+                || VpnService.prepare(context) != null) return;
+        try {
+            String active = TvGatewayStore.getActiveTunerId(context);
+            for (var profile : TvGatewayStore.load(context)) {
+                if (!profile.getTunerId().equals(active)) continue;
+                Intent start = new Intent(context, ZeroTierOneService.class);
+                start.putExtra(ZeroTierOneService.ZT1_NETWORK_ID, profile.getNetworkId());
+                ContextCompat.startForegroundService(context, start);
+                return;
+            }
+        } catch (RuntimeException restricted) {
+            // OEM background restrictions must not crash the receiver or fake a connection.
+            PreferenceManager.getDefaultSharedPreferences(context).edit()
+                    .putString("blackserv_tv_last_error", "Autostart niedostępny. Połącz z ekranu aplikacji.").apply();
         }
     }
 }

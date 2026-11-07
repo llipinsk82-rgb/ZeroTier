@@ -24,4 +24,13 @@
     <color name="logo_bkg">#FAC073</color>
 
     <color name="zerotier_orange">#fac073</color>
+    <color name="tv_canvas">#10191E</color>
+    <color name="tv_surface">#1D2D31</color>
+    <color name="tv_focus">#95E1D9</color>
+    <color name="tv_connected">#3AA37A</color>
+    <color name="tv_disconnected">#829397</color>
+    <color name="tv_pending">#F1BB60</color>
+    <color name="tv_error">#D85B65</color>
+    <color name="tv_text">#F4F8F7</color>
+    <color name="tv_muted">#B4C5C5</color>
 </resources>

@@ -3,7 +3,14 @@ plugins {
 }
 
 android {
+    ndkVersion '23.1.7779620'
     compileSdkVersion rootProject.ext.compileSdkVersion
+
+    sourceSets {
+        main {
+            java.srcDir('../externals/core/java/src')
+        }
+    }
 
     defaultConfig {
         minSdkVersion rootProject.ext.minSdkVersion

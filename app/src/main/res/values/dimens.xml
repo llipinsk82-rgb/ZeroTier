@@ -1,4 +1,8 @@
 <resources>
     <dimen name="fab_margin">16dp</dimen>
     <dimen name="text_margin">16dp</dimen>
+    <dimen name="tv_screen_inset">48dp</dimen>
+    <dimen name="tv_card_min_height">112dp</dimen>
+    <dimen name="tv_card_radius">18dp</dimen>
+    <dimen name="tv_card_gap">14dp</dimen>
 </resources>

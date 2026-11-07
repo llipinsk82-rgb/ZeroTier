@@ -44,8 +44,11 @@
         <activity android:name=".ui.view.NetworkDetailActivity" android:label="@string/network_detail" />
         <activity android:name=".ui.MoonOrbitActivity" android:label="@string/moon_orbit_activity" />
         <activity android:name=".ui.PeerListActivity" android:label="@string/peer_list" />
-        <receiver android:name=".service.StartupReceiver" android:exported="true">
-            <intent-filter><action android:name="android.intent.action.BOOT_COMPLETED" /></intent-filter>
+        <receiver android:name=".ui.tv.TvBootReceiver" android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
         </receiver>
     </application>
 </manifest>

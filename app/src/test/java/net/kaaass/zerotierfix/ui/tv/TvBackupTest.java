@@ -24,6 +24,15 @@ public class TvBackupTest {
         assertEquals("1.1.1.1,1.0.0.1", s.dns);
         assertEquals("com.example.player", s.exclusions); assertTrue(s.boot);
     }
+    @Test public void backupRoundTripKeepsIndependentTunerDns() throws Exception {
+        org.json.JSONObject backup = new org.json.JSONObject(valid());
+        backup.put("dnsByTuner", new org.json.JSONObject()
+                .put("#5", "192.168.18.5"));
+        var restored = TvBackup.decode(backup.toString());
+        assertEquals("192.168.18.5", restored.dnsByTuner.get("#5"));
+        assertFalse(restored.dnsByTuner.containsKey("#9"));
+    }
+
     @Test public void emptySelectionRemainsEmpty() throws Exception {
         var s = TvBackup.decode(TvBackup.encode(Collections.emptyList(), "1.1.1.1", "", false));
         assertTrue(s.profiles.isEmpty()); assertEquals("", s.exclusions); assertFalse(s.boot);

@@ -149,7 +149,11 @@ public final class TvDiagnosticsActivity extends AppCompatActivity {
             }
         }
         if (found == 0) return "DNS leak: nierozstrzygnięty — serwer nie zarejestrował resolverów.";
-        out.append("\nPorównaj operatorów z wybranym DNS: ").append(TvNetworkSettings.dns(this));
+        String activeTuner = TvGatewayStore.getActiveTunerId(this);
+        String configuredDns = TvNetworkStore.dnsForTuner(this, activeTuner);
+        out.append("\nDNS aktywnego tunera: ")
+                .append(activeTuner == null ? "brak aktywnego tunera" : activeTuner)
+                .append(" · ").append(configuredDns == null ? "nie skonfigurowano" : configuredDns);
         out.append("\nResolver operatora UK podczas VPN może oznaczać wyciek. Kraj publicznego resolvera sam nie dowodzi wycieku. Test dotyczy DNS systemowego tej aplikacji, nie własnego DoH innych aplikacji.");
         return out.toString();
     }

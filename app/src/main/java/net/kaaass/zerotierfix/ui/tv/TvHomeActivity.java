@@ -44,7 +44,11 @@ import org.greenrobot.eventbus.Subscribe;
 import org.greenrobot.eventbus.ThreadMode;
 
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.io.IOException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -75,6 +79,7 @@ public final class TvHomeActivity extends AppCompatActivity {
             events.post(new NetworkListRequestEvent());
             maybeProbeExit();
             maybeReconnect();
+            maybeFailoverOnMissingNetwork();
             uiHandler.postDelayed(this, 7000);
         }
     };
@@ -87,6 +92,11 @@ public final class TvHomeActivity extends AppCompatActivity {
     private long verifiedAtMs;
     private String verifiedPublicIp;
     private String verificationProblem;
+    private final Set<String> failedTunerIds = new HashSet<>();
+    private final Map<String, Long> exitProbeLatenciesMs = new HashMap<>();
+    private long lastAutomaticSwitchAtMs = -90_000;
+    private long connectionStartedAtMs;
+    private int unavailableNetworkPolls;
 
     @Override
     protected void onCreate(@Nullable Bundle state) {
@@ -132,6 +142,8 @@ public final class TvHomeActivity extends AppCompatActivity {
         tvResumed = true;
         exitSession.select(TvGatewayStore.getActiveTunerId(this));
         resetExitVerification();
+        connectionStartedAtMs = SystemClock.elapsedRealtime();
+        unavailableNetworkPolls = 0;
         if (!events.isRegistered(this)) {
             events.register(this);
         }
@@ -254,6 +266,13 @@ public final class TvHomeActivity extends AppCompatActivity {
     }
 
     private void toggle(TvGatewayProfile profile) {
+        failedTunerIds.clear();
+        unavailableNetworkPolls = 0;
+        toggleQueued(profile);
+    }
+
+    /** Automatic switches preserve the attempted set to prevent a fallback loop. */
+    private void toggleQueued(TvGatewayProfile profile) {
         String current = TvGatewayStore.getActiveTunerId(this);
         if (profile.getTunerId().equals(current)) {
             if (serviceRunning) {
@@ -293,6 +312,8 @@ public final class TvHomeActivity extends AppCompatActivity {
         connectionError = false;
         networkReady = false;
         joinedNetworkId = 0;
+        connectionStartedAtMs = SystemClock.elapsedRealtime();
+        unavailableNetworkPolls = 0;
         TvGatewayStore.setActiveTunerId(this, profile.getTunerId());
         Intent start = new Intent(this, ZeroTierOneService.class);
         start.putExtra(ZeroTierOneService.ZT1_NETWORK_ID, profile.getNetworkId());
@@ -322,6 +343,8 @@ public final class TvHomeActivity extends AppCompatActivity {
         nextReconnectAtMs = now + TvReconnectPolicy.delayMs(reconnectFailures++);
         try {
             TvNetworkStore.ensure(this, active);
+            connectionStartedAtMs = SystemClock.elapsedRealtime();
+            unavailableNetworkPolls = 0;
             Intent start = new Intent(this, ZeroTierOneService.class);
             start.putExtra(ZeroTierOneService.ZT1_NETWORK_ID, active.getNetworkId());
             ContextCompat.startForegroundService(this, start);
@@ -397,7 +420,6 @@ public final class TvHomeActivity extends AppCompatActivity {
             render();
         }
         maybeProbeExit();
-        if (running) { reconnectFailures = 0; nextReconnectAtMs = 0; }
     }
 
     @Subscribe(threadMode = ThreadMode.MAIN)
@@ -436,6 +458,7 @@ public final class TvHomeActivity extends AppCompatActivity {
             networkReady = ready;
             joinedNetworkId = newNetworkId;
             if (!ready) resetExitVerification();
+            else unavailableNetworkPolls = 0;
             render();
         }
         maybeProbeExit();
@@ -459,7 +482,7 @@ public final class TvHomeActivity extends AppCompatActivity {
             // Queue the replacement so it starts only after teardown returns.
             uiHandler.post(() -> {
                 if (tvResumed) {
-                    toggle(next);
+                    toggleQueued(next);
                 } else {
                     pendingSwitch = next;
                 }
@@ -473,6 +496,49 @@ public final class TvHomeActivity extends AppCompatActivity {
         connectionError = true;
         verificationProblem = error.getMessage();
         render();
+    }
+
+    private void maybeFailoverOnMissingNetwork() {
+        if (!tvResumed || !serviceRunning || networkReady || pendingSwitch != null
+                || connectionStartedAtMs == 0
+                || SystemClock.elapsedRealtime() - connectionStartedAtMs < 25_000) return;
+        // No alternate should be selected just because the household internet went down.
+        ConnectivityManager manager = (ConnectivityManager) getSystemService(CONNECTIVITY_SERVICE);
+        NetworkInfo upstream = manager == null ? null : manager.getActiveNetworkInfo();
+        if (upstream == null || !upstream.isConnected()) return;
+        unavailableNetworkPolls++;
+        maybeAutomaticSwitch(unavailableNetworkPolls);
+    }
+
+    private void maybeAutomaticSwitch(int consecutiveFailures) {
+        long now = SystemClock.elapsedRealtime();
+        if (!tvResumed || pendingSwitch != null
+                || !TvFailoverPolicy.maySwitch(consecutiveFailures, now, lastAutomaticSwitchAtMs)) return;
+        String currentId = TvGatewayStore.getActiveTunerId(this);
+        if (currentId == null) return;
+        failedTunerIds.add(currentId);
+        List<TvGatewayProfile> eligible = new ArrayList<>();
+        for (TvGatewayProfile profile : gateways) {
+            try {
+                if (TvNetworkStore.dnsForTuner(this, profile.getTunerId()) != null) {
+                    eligible.add(profile);
+                }
+            } catch (IllegalArgumentException invalidDns) {
+                // An invalid resolver cannot be an automatic exit candidate.
+            }
+        }
+        TvGatewayProfile next = TvFailoverPolicy.next(
+                eligible, currentId, failedTunerIds, exitProbeLatenciesMs);
+        if (next == null) {
+            connectionError = true;
+            verificationProblem = "Brak sprawdzonego tunera zapasowego. Pozostawiono VPN bez zmiany trasy.";
+            render();
+            return;
+        }
+        lastAutomaticSwitchAtMs = now;
+        verificationProblem = "Przełączanie na " + next.getDisplayName() + " po błędach wyjścia.";
+        pendingSwitch = next;
+        disconnect();
     }
 
     /**
@@ -503,6 +569,7 @@ public final class TvHomeActivity extends AppCompatActivity {
         final String tunerId = active.getTunerId();
         final String expectedIp = active.getExpectedPublicIpv4();
         final long token = exitSession.token();
+        final long probeStartedAtMs = SystemClock.elapsedRealtime();
         probeInProgress = true;
         exitExecutor.execute(() -> {
             String observed = null;
@@ -530,19 +597,27 @@ public final class TvHomeActivity extends AppCompatActivity {
                     if (probeFailures >= 3) {
                         connectionError = true;
                         verificationProblem = "Brak weryfikacji wyjścia. Rozłącz i spróbuj ponownie.";
+                        maybeAutomaticSwitch(probeFailures);
                     }
                 } else if (result == TvExitVerification.Result.VERIFIED) {
                     exitVerified = true;
                     verifiedAtMs = SystemClock.elapsedRealtime();
                     verifiedPublicIp = actualIp;
+                    exitProbeLatenciesMs.put(tunerId,
+                            SystemClock.elapsedRealtime() - probeStartedAtMs);
+                    failedTunerIds.clear();
                     probeFailures = 0;
+                    reconnectFailures = 0;
+                    nextReconnectAtMs = 0;
                     verificationProblem = null;
                 } else {
                     exitVerified = false;
-                    connectionError = true;
+                    probeFailures++;
+                    connectionError = probeFailures >= 3;
                     verificationProblem = result == TvExitVerification.Result.WRONG_EXIT
                             ? "Zły adres wyjściowy: " + actualIp + " (oczekiwano " + expectedIp + ")."
                             : "Odpowiedź serwera IP niepoprawna. Sprawdź trasę VPN.";
+                    if (probeFailures >= 3) maybeAutomaticSwitch(probeFailures);
                 }
                 render();
             });
@@ -705,6 +780,8 @@ public final class TvHomeActivity extends AppCompatActivity {
                     List<TvGatewayProfile> copy = new ArrayList<>(gateways);
                     copy.remove(profile);
                     TvGatewayStore.save(this, copy);
+                    android.preference.PreferenceManager.getDefaultSharedPreferences(this).edit()
+                            .remove("blackserv_tv_dns_profile_" + profile.getTunerId()).apply();
                     refreshCards();
                 }).show();
     }

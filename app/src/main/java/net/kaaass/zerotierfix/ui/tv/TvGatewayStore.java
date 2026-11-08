@@ -3,6 +3,7 @@ package net.kaaass.zerotierfix.ui.tv;
 import android.content.Context;
 import android.content.SharedPreferences;
 import android.preference.PreferenceManager;
+import java.util.ArrayList;
 import java.util.List;
 
 /** Persists user-verified tuner mappings separately from ZeroTier networks. */
@@ -16,15 +17,31 @@ public final class TvGatewayStore {
     public static List<TvGatewayProfile> load(Context context) {
         String saved = prefs(context).getString(PREF_GATEWAYS, null);
         if (saved == null) return defaults();
-        return TvGatewayCodec.decode(saved);
+        List<TvGatewayProfile> profiles = TvGatewayCodec.decode(saved);
+        List<TvGatewayProfile> updated = new ArrayList<>(profiles.size());
+        boolean migrated = false;
+        for (TvGatewayProfile profile : profiles) {
+            if ("#23".equals(profile.getTunerId())
+                    && "Tuner #23 — Polska".equals(profile.getDisplayName())
+                    && "a581878f7d6c0187".equals(profile.getNetworkIdHex())
+                    && "10.32.73.190".equals(profile.getGatewayIpv4())
+                    && "91.227.218.90".equals(profile.getExpectedPublicIpv4())) {
+                updated.add(defaults().get(2));
+                migrated = true;
+            } else {
+                updated.add(profile);
+            }
+        }
+        if (migrated) save(context, updated);
+        return updated;
     }
 
-    /** Read-only BlackServ audit 2026-11-04: next hops are the routers behind proxy-ARP tuners. */
+    /** Verified profiles; ID23 was reconfigured on 2026-11-07. Do not mutate tuner firmware. */
     public static List<TvGatewayProfile> defaults() {
         return java.util.Arrays.asList(
             new TvGatewayProfile("#5", "Tuner #5 — Polska", "05b1a061a1000001", "192.168.18.1", "91.227.216.230"),
             new TvGatewayProfile("#9", "Tuner #9 — Polska", "c0edc64972000001", "192.168.100.1", "185.148.67.216"),
-            new TvGatewayProfile("#23", "Tuner #23 — Polska", "a581878f7d6c0187", "10.32.73.190", "91.227.218.90"));
+            new TvGatewayProfile("#23", "Tuner #23 — Polska", "2c1ee692a07a5d21", "192.168.111.1", "91.227.218.90"));
     }
 
     public static void save(Context context, List<TvGatewayProfile> gateways) {

@@ -1,7 +1,14 @@
 package net.kaaass.zerotierfix.ui.tv;
 import org.junit.Test;
+import org.junit.runner.RunWith;
+import org.robolectric.RobolectricTestRunner;
+import org.robolectric.RuntimeEnvironment;
+import org.robolectric.annotation.Config;
+import android.preference.PreferenceManager;
 import java.util.Collections;
 import static org.junit.Assert.*;
+@RunWith(RobolectricTestRunner.class)
+@Config(sdk = 28)
 public class TvBackupTest {
     private String valid() throws Exception {
         return TvBackup.encode(Collections.singletonList(new TvGatewayProfile("#5", "Zażółć — Polska", "0123456789abcdef", "10.1.1.1", "91.1.2.3")),
@@ -13,8 +20,8 @@ public class TvBackupTest {
         assertEquals("192.168.100.1", p.get(1).getGatewayIpv4());
         assertEquals("05b1a061a1000001", p.get(0).getNetworkIdHex());
         assertEquals("c0edc64972000001", p.get(1).getNetworkIdHex());
-        assertEquals("a581878f7d6c0187", p.get(2).getNetworkIdHex());
-        assertEquals("10.32.73.190", p.get(2).getGatewayIpv4());
+        assertEquals("2c1ee692a07a5d21", p.get(2).getNetworkIdHex());
+        assertEquals("192.168.111.1", p.get(2).getGatewayIpv4());
     }
     @Test public void roundTripPreservesProfilesDnsAndExclusions() throws Exception {
         var s = TvBackup.decode(valid());
@@ -31,6 +38,17 @@ public class TvBackupTest {
         var restored = TvBackup.decode(backup.toString());
         assertEquals("192.168.18.5", restored.dnsByTuner.get("#5"));
         assertFalse(restored.dnsByTuner.containsKey("#9"));
+    }
+
+    @Test public void restoringBackupClearsOldProfileDnsOverrides() throws Exception {
+        var context = RuntimeEnvironment.getApplication();
+        var prefs = PreferenceManager.getDefaultSharedPreferences(context);
+        prefs.edit().clear()
+                .putString("blackserv_tv_dns_profile_#9", "8.8.8.8")
+                .commit();
+        TvBackup.restore(context, TvBackup.decode(valid()));
+        assertFalse("DNS from removed profile must not survive import",
+                prefs.contains("blackserv_tv_dns_profile_#9"));
     }
 
     @Test public void emptySelectionRemainsEmpty() throws Exception {

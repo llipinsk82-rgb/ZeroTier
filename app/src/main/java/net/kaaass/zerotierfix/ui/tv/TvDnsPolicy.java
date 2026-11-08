@@ -9,6 +9,7 @@ public final class TvDnsPolicy {
     public static String defaultDns(String tunerId) {
         if ("#5".equals(tunerId)) return "192.168.18.5";
         if ("#9".equals(tunerId)) return "192.168.100.153";
+        if ("#23".equals(tunerId)) return "194.204.152.34";
         return null;
     }
 

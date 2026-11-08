@@ -13,14 +13,20 @@ import net.kaaass.zerotierfix.util.DatabaseUtils;
 public final class TvNetworkStore {
     private TvNetworkStore() { }
 
-    public static void ensure(Context context, TvGatewayProfile profile) {
-        String defaultDns = TvDnsPolicy.defaultDns(profile.getTunerId());
+    /** Returns a verified per-tuner resolver or null, never the legacy global DNS. */
+    public static String dnsForTuner(Context context, String tunerId) {
+        if (tunerId == null) return null;
         String configuredDns = PreferenceManager.getDefaultSharedPreferences(context)
-                .getString("blackserv_tv_dns_profile_" + profile.getTunerId(), defaultDns);
-        if (configuredDns == null || configuredDns.trim().isEmpty()) {
+                .getString("blackserv_tv_dns_profile_" + tunerId, TvDnsPolicy.defaultDns(tunerId));
+        if (configuredDns == null || configuredDns.trim().isEmpty()) return null;
+        return TvDnsPolicy.validate(configuredDns);
+    }
+
+    public static void ensure(Context context, TvGatewayProfile profile) {
+        String dns = dnsForTuner(context, profile.getTunerId());
+        if (dns == null) {
             throw new IllegalStateException("No verified tuner DNS for " + profile.getTunerId());
         }
-        final String dns = TvDnsPolicy.validate(configuredDns);
         var dao = ((ZerotierFixApplication) context.getApplicationContext()).getDaoSession();
         DatabaseUtils.writeLock.lock();
         try {

@@ -69,6 +69,30 @@ public class TvProfileDeletionTest {
             (net.kaaass.zerotierfix.ZerotierFixApplication) context;
         assertNotNull(app.getDaoSession().getNetworkDao().load(p.getNetworkId()));
     }
+    @Test public void deletingProfileRemovesItsDnsOverride() {
+        var prefs = PreferenceManager.getDefaultSharedPreferences(context);
+        prefs.edit().putString("blackserv_tv_dns_profile_#5", "8.8.8.8").commit();
+        delete("#5");
+        assertFalse("Re-added tuner must not inherit a removed profile's resolver",
+                prefs.contains("blackserv_tv_dns_profile_#5"));
+    }
+    @Test public void automaticFallbackWaitsForRepeatedFailuresAndOldNodeShutdown() throws Exception {
+        TvGatewayStore.setActiveTunerId(context, "#5");
+        java.lang.reflect.Method failover = TvHomeActivity.class.getDeclaredMethod(
+                "maybeAutomaticSwitch", int.class);
+        failover.setAccessible(true);
+        failover.invoke(controller.get(), 2);
+        java.lang.reflect.Field pending = TvHomeActivity.class.getDeclaredField("pendingSwitch");
+        pending.setAccessible(true);
+        assertNull("One or two probe errors must not switch exits", pending.get(controller.get()));
+
+        failover.invoke(controller.get(), 3);
+        TvGatewayProfile next = (TvGatewayProfile) pending.get(controller.get());
+        assertNotNull("Repeated failures must select a configured alternate", next);
+        assertEquals("#9", next.getTunerId());
+        assertNull("Do not start another ZeroTier node before teardown",
+                TvGatewayStore.getActiveTunerId(context));
+    }
     @Test public void readdingSameTunerViaDialogProducesExactlyOneCard() throws Exception {
         TvGatewayProfile p = TvGatewayStore.load(context).get(0);
         delete("#5");

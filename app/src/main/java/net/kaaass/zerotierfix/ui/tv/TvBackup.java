@@ -93,12 +93,17 @@ public final class TvBackup {
         return json.toString(2);
     }
     public static void restore(Context c, Settings settings) {
-        var edit = PreferenceManager.getDefaultSharedPreferences(c).edit()
+        var prefs = PreferenceManager.getDefaultSharedPreferences(c);
+        var edit = prefs.edit()
             .putString(TvGatewayStore.PREF_GATEWAYS, TvGatewayCodec.encode(settings.profiles))
             .putString(TvNetworkSettings.DNS, settings.dns)
             .putString(VpnBypassConfig.PREF_KEY, settings.exclusions)
             .putBoolean(TvNetworkSettings.BOOT, settings.boot)
             .remove(TvGatewayStore.PREF_ACTIVE_TUNER);
+        // Remove DNS for profiles absent from the incoming backup, not just their cards.
+        for (String key : prefs.getAll().keySet()) {
+            if (key.startsWith("blackserv_tv_dns_profile_")) edit.remove(key);
+        }
         for (Map.Entry<String, String> dns : settings.dnsByTuner.entrySet()) {
             edit.putString("blackserv_tv_dns_profile_" + dns.getKey(), dns.getValue());
         }

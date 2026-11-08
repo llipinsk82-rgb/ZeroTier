@@ -730,7 +730,10 @@ public class ZeroTierOneService extends VpnService implements Runnable, EventLis
 
     @Override // com.zerotier.sdk.EventListener
     public void onTrace(String str) {
-        Log.d(TAG, "Trace: " + str);
+        // Trace callbacks can be very frequent under heavy tunnel traffic.
+        if (net.kaaass.zerotierfix.BuildConfig.DEBUG) {
+            Log.d(TAG, "Trace: " + str);
+        }
     }
 
     /**

@@ -69,6 +69,13 @@ public class TvProfileDeletionTest {
             (net.kaaass.zerotierfix.ZerotierFixApplication) context;
         assertNotNull(app.getDaoSession().getNetworkDao().load(p.getNetworkId()));
     }
+    @Test public void deletingProfileRemovesItsDnsOverride() {
+        var prefs = PreferenceManager.getDefaultSharedPreferences(context);
+        prefs.edit().putString("blackserv_tv_dns_profile_#5", "8.8.8.8").commit();
+        delete("#5");
+        assertFalse("Re-added tuner must not inherit a removed profile's resolver",
+                prefs.contains("blackserv_tv_dns_profile_#5"));
+    }
     @Test public void readdingSameTunerViaDialogProducesExactlyOneCard() throws Exception {
         TvGatewayProfile p = TvGatewayStore.load(context).get(0);
         delete("#5");

@@ -468,9 +468,13 @@ public class ZeroTierOneService extends VpnService implements Runnable, EventLis
         }
         if (this.vpnThread != null && this.vpnThread.isAlive()) {
             this.vpnThread.interrupt();
-            try {
-                this.vpnThread.join();
-            } catch (InterruptedException ignored) {
+            // processBackgroundTasks() may call shutdown from the VPN worker.
+            if (this.vpnThread != Thread.currentThread()) {
+                try {
+                    this.vpnThread.join();
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
             }
             this.vpnThread = null;
         }

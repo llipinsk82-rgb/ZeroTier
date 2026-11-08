@@ -15,8 +15,8 @@ android {
         applicationId "uk.blackserv.zerotiertv"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 21
-        versionName "2.0.0-tv-beta.1"
+        versionCode 22
+        versionName "3.0.0-tv-beta.1"
         multiDexEnabled true
 
         testInstrumentationRunner 'androidx.test.runner.AndroidJUnitRunner'
@@ -25,6 +25,14 @@ android {
     testOptions { unitTests.includeAndroidResources = true }
 
     buildTypes {
+        // Side-by-side TCL smoke tests preserve the installed app and its Node ID
+        // when the original production signing key is unavailable.
+        candidate {
+            initWith debug
+            applicationIdSuffix '.candidate'
+            versionNameSuffix '-candidate'
+            matchingFallbacks = ['debug']
+        }
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'

@@ -84,8 +84,9 @@ public final class TvBackup {
         JSONObject dns = new JSONObject();
         for (TvGatewayProfile profile : profiles) {
             String address = prefs.getString("blackserv_tv_dns_profile_" + profile.getTunerId(),
-                    TvDnsPolicy.defaultDns(profile.getTunerId()));
-            if (address != null && !address.trim().isEmpty()) {
+                    TvDnsPolicy.AUTO);
+            if (address != null && !address.trim().isEmpty()
+                    && !TvDnsPolicy.AUTO.equalsIgnoreCase(address)) {
                 dns.put(profile.getTunerId(), TvDnsPolicy.validate(address));
             }
         }

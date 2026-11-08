@@ -64,6 +64,8 @@ public final class TvHomeActivity extends AppCompatActivity {
     private final List<TvGatewayProfile> gateways = new ArrayList<>();
     private LinearLayout cards;
     private TextView summary;
+    private TvPremiumDashboard dashboard;
+    private String assignedVpnAddress;
     private TvGatewayProfile pendingConsent;
     private boolean serviceRunning;
     private boolean networkReady;
@@ -85,6 +87,8 @@ public final class TvHomeActivity extends AppCompatActivity {
     };
     private int reconnectFailures;
     private long nextReconnectAtMs;
+    private int sameTunerRestartAttempts;
+    private long lastSameTunerRestartAtMs;
     private boolean tvResumed;
     private boolean exitVerified;
     private boolean probeInProgress;
@@ -102,38 +106,13 @@ public final class TvHomeActivity extends AppCompatActivity {
     protected void onCreate(@Nullable Bundle state) {
         super.onCreate(state);
         getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_FULLSCREEN);
+        if (getSupportActionBar() != null) getSupportActionBar().hide();
 
-        ScrollView scroll = new ScrollView(this);
-        scroll.setFillViewport(true);
-        scroll.setBackgroundColor(color(R.color.tv_canvas));
-        LinearLayout root = new LinearLayout(this);
-        root.setOrientation(LinearLayout.VERTICAL);
-        int inset = getResources().getDimensionPixelSize(R.dimen.tv_screen_inset);
-        root.setPadding(inset, inset, inset, inset);
-        scroll.addView(root);
-
-        TextView brand = text("BLACKSERV  /  ZEROTIER TV", 19, R.color.tv_focus, true);
-        root.addView(brand);
-
-        
-        
-        
-
-        summary = text("Brak aktywnego połączenia", 18, R.color.tv_muted, false);
-        root.addView(summary, verticalSpace(4));
-
-        cards = new LinearLayout(this);
-        cards.setOrientation(LinearLayout.VERTICAL);
-        root.addView(cards, verticalSpace(26));
-
-        root.addView(action("Ustawienia", this::showSettings), verticalSpace(18));
-
-        TextView caption = text(
-                "Zielony status pojawi się dopiero po weryfikacji polskiego adresu wyjściowego.",
-                16, R.color.tv_muted, false);
-        root.addView(caption, verticalSpace(22));
-
-        setContentView(scroll);
+        dashboard = new TvPremiumDashboard(this, this::showSettings,
+                this::showDnsProfilePicker, () -> document(EXPORT), this::showAddDialog);
+        summary = dashboard.summary;
+        cards = dashboard.cards;
+        setContentView(dashboard.view());
     }
 
     @Override
@@ -210,6 +189,8 @@ public final class TvHomeActivity extends AppCompatActivity {
                 break;
             }
         }
+        TvGatewayProfile selectedProfile = selectedIndex < 0 ? null : gateways.get(selectedIndex);
+        TvConnectionState.Status selectedStatus = TvConnectionState.Status.OFF;
         for (int index = 0; index < gateways.size(); index++) {
             TvGatewayProfile profile = gateways.get(index);
             boolean joined = serviceRunning && networkReady
@@ -217,31 +198,13 @@ public final class TvHomeActivity extends AppCompatActivity {
             TvConnectionState.Status status = TvConnectionState.forTile(
                     index + 1, selectedIndex + 1, joined, exitVerified && joined,
                     connectionError && index == selectedIndex);
-            LinearLayout card = new LinearLayout(this);
-            card.setOrientation(LinearLayout.VERTICAL);
-            card.setPadding(dp(24), dp(18), dp(24), dp(18));
-            card.setMinimumHeight(getResources().getDimensionPixelSize(R.dimen.tv_card_min_height));
-            card.setFocusable(true);
-            card.setClickable(true);
-            card.setTag(profile.getTunerId());
-            card.setContentDescription(profile.getTunerId() + ", " + profile.getDisplayName()
-                    + ", " + label(status));
-            card.addView(text(profile.getTunerId(), 26, R.color.tv_text, true));
-            card.addView(text(profile.getDisplayName(), 19, R.color.tv_muted, false));
-            card.addView(text(profile.getTunerId().equals(selectedId) && verifiedPublicIp != null
-                    ? "Publiczny IP: " + verifiedPublicIp : "OK: połącz / rozłącz", 16, R.color.tv_muted, false));
-            int stateColor = statusColor(status);
-            card.addView(text(label(status), 17, stateColor, true));
-
-            card.setBackground(tileBackground(status, false));
-            card.setOnFocusChangeListener((v, focus) ->
-                    card.setBackground(tileBackground(status, focus)));
-            card.setOnClickListener(v -> toggle(profile));
-            card.setOnLongClickListener(v -> {
-                confirmDelete(profile);
-                return true;
-            });
-            cards.addView(card, verticalSpace(index == 0 ? 0 : 14));
+            if (index == selectedIndex) selectedStatus = status;
+            String detail = profile.getExpectedPublicIpv4() == null
+                    ? "Polska · weryfikacja wyjścia wymagana"
+                    : "PL wyjście · " + profile.getExpectedPublicIpv4();
+            LinearLayout card = dashboard.card(profile, status, index == selectedIndex,
+                    detail, () -> toggle(profile), () -> confirmDelete(profile));
+            cards.addView(card, verticalSpace(index == 0 ? 0 : 9));
             if (profile.getTunerId().equals(focusedTunerId)) {
                 card.requestFocus();
             }
@@ -263,11 +226,24 @@ public final class TvHomeActivity extends AppCompatActivity {
         } else {
             summary.setText("Łączenie z wybranym tunerem...");
         }
+        String dnsText = "Automatyczny · ZeroTier";
+        if (selectedProfile != null) {
+            String storedDns = android.preference.PreferenceManager.getDefaultSharedPreferences(this)
+                    .getString("blackserv_tv_dns_profile_" + selectedProfile.getTunerId(), TvDnsPolicy.AUTO);
+            if (storedDns != null && !TvDnsPolicy.AUTO.equalsIgnoreCase(storedDns)) {
+                dnsText = storedDns;
+            }
+        }
+        dashboard.showSession(selectedProfile, selectedStatus,
+                serviceRunning && networkReady ? assignedVpnAddress : null,
+                exitVerified ? verifiedPublicIp : null, dnsText);
     }
 
     private void toggle(TvGatewayProfile profile) {
         failedTunerIds.clear();
         unavailableNetworkPolls = 0;
+        sameTunerRestartAttempts = 0;
+        lastSameTunerRestartAtMs = 0;
         toggleQueued(profile);
     }
 
@@ -312,6 +288,7 @@ public final class TvHomeActivity extends AppCompatActivity {
         connectionError = false;
         networkReady = false;
         joinedNetworkId = 0;
+        assignedVpnAddress = null;
         connectionStartedAtMs = SystemClock.elapsedRealtime();
         unavailableNetworkPolls = 0;
         TvGatewayStore.setActiveTunerId(this, profile.getTunerId());
@@ -358,10 +335,16 @@ public final class TvHomeActivity extends AppCompatActivity {
     private void disconnect() {
         exitSession.clear();
         resetExitVerification();
+        // VpnService is also bound by Android. stopService() clears the started
+        // state, but does not destroy a still-bound service or its native node.
+        // Request the service's own teardown so it emits NodeDestroyedEvent;
+        // only that event is allowed to release a queued profile switch.
+        events.post(new StopEvent());
         stopService(new Intent(this, ZeroTierOneService.class));
         TvGatewayStore.setActiveTunerId(this, null);
         pendingConsent = null;
         joinedNetworkId = 0;
+        assignedVpnAddress = null;
         networkReady = false;
         serviceRunning = false;
         connectionError = false;
@@ -434,6 +417,7 @@ public final class TvHomeActivity extends AppCompatActivity {
         }
         long newNetworkId = 0;
         boolean ready = false;
+        String assigned = null;
         if (active != null && reply.getNetworkList() != null) {
             for (VirtualNetworkConfig config : reply.getNetworkList()) {
                 if (config == null || config.getNwid() != active.getNetworkId()) continue;
@@ -449,6 +433,12 @@ public final class TvHomeActivity extends AppCompatActivity {
                         connectionError = false; verificationProblem = null;
                     }
                     newNetworkId = config.getNwid();
+                    for (java.net.InetSocketAddress address : config.getAssignedAddresses()) {
+                        if (address.getAddress() instanceof java.net.Inet4Address) {
+                            assigned = address.getAddress().getHostAddress();
+                            break;
+                        }
+                    }
                     ready = true;
                     break;
                 }
@@ -457,6 +447,7 @@ public final class TvHomeActivity extends AppCompatActivity {
         if (networkReady != ready || joinedNetworkId != newNetworkId) {
             networkReady = ready;
             joinedNetworkId = newNetworkId;
+            assignedVpnAddress = assigned;
             if (!ready) resetExitVerification();
             else unavailableNetworkPolls = 0;
             render();
@@ -470,6 +461,7 @@ public final class TvHomeActivity extends AppCompatActivity {
         serviceRunning = false;
         networkReady = false;
         joinedNetworkId = 0;
+        assignedVpnAddress = null;
         if (TvGatewayStore.getActiveTunerId(this) != null) {
             connectionError = true;
             verificationProblem = "Tunel VPN przerwany. Rozłącz i połącz ponownie.";
@@ -512,17 +504,32 @@ public final class TvHomeActivity extends AppCompatActivity {
 
     private void maybeAutomaticSwitch(int consecutiveFailures) {
         long now = SystemClock.elapsedRealtime();
-        if (!tvResumed || pendingSwitch != null
-                || !TvFailoverPolicy.maySwitch(consecutiveFailures, now, lastAutomaticSwitchAtMs)) return;
+        if (!tvResumed || pendingSwitch != null || consecutiveFailures < 3) return;
         String currentId = TvGatewayStore.getActiveTunerId(this);
         if (currentId == null) return;
+        if (TvReconnectPolicy.shouldRestartBeforeFailover(consecutiveFailures,
+                sameTunerRestartAttempts, now, lastSameTunerRestartAtMs)) {
+            for (TvGatewayProfile active : gateways) {
+                if (active.getTunerId().equals(currentId)) {
+                    sameTunerRestartAttempts++;
+                    lastSameTunerRestartAtMs = now;
+                    pendingSwitch = active;
+                    disconnect();
+                    return;
+                }
+            }
+        }
+        // A restart is still cooling down: do not jump straight to backup.
+        if (sameTunerRestartAttempts < 2
+                || !TvFailoverPolicy.maySwitch(consecutiveFailures, now, lastAutomaticSwitchAtMs)) return;
         failedTunerIds.add(currentId);
         List<TvGatewayProfile> eligible = new ArrayList<>();
         for (TvGatewayProfile profile : gateways) {
             try {
-                if (TvNetworkStore.dnsForTuner(this, profile.getTunerId()) != null) {
-                    eligible.add(profile);
-                }
+                // Null means controller DNS (validated when the network joins).
+                // Invalid manual addresses are excluded before attempting the exit.
+                TvNetworkStore.dnsForTuner(this, profile.getTunerId());
+                eligible.add(profile);
             } catch (IllegalArgumentException invalidDns) {
                 // An invalid resolver cannot be an automatic exit candidate.
             }
@@ -609,6 +616,8 @@ public final class TvHomeActivity extends AppCompatActivity {
                     probeFailures = 0;
                     reconnectFailures = 0;
                     nextReconnectAtMs = 0;
+                    sameTunerRestartAttempts = 0;
+                    lastSameTunerRestartAtMs = 0;
                     verificationProblem = null;
                 } else {
                     exitVerified = false;
@@ -681,7 +690,7 @@ public final class TvHomeActivity extends AppCompatActivity {
                             var preferences = android.preference.PreferenceManager.getDefaultSharedPreferences(this);
                             String oldKey = "blackserv_tv_dns_profile_" + existing.getTunerId();
                             String oldDns = preferences.getString(oldKey,
-                                    TvDnsPolicy.defaultDns(existing.getTunerId()));
+                                    TvDnsPolicy.AUTO);
                             if (oldDns != null) {
                                 preferences.edit()
                                         .putString("blackserv_tv_dns_profile_" + profile.getTunerId(), oldDns)
@@ -712,22 +721,54 @@ public final class TvHomeActivity extends AppCompatActivity {
     private void showDnsEditor(TvGatewayProfile profile) {
         String key = "blackserv_tv_dns_profile_" + profile.getTunerId();
         var prefs = android.preference.PreferenceManager.getDefaultSharedPreferences(this);
-        String defaultDns = TvDnsPolicy.defaultDns(profile.getTunerId());
+        String dns = prefs.getString(key, TvDnsPolicy.AUTO);
+        String[] providers = {"Automatyczny · z sieci ZeroTier", "Cloudflare · 1.1.1.1",
+                "Google · 8.8.8.8", "Orange Polska · 194.204.152.34", "Własny adres DNS…"};
+        int selected = 4;
+        if (dns == null || TvDnsPolicy.AUTO.equalsIgnoreCase(dns)) selected = 0;
+        else if (dns.equals(TvDnsPolicy.providerDns("cloudflare"))) selected = 1;
+        else if (dns.equals(TvDnsPolicy.providerDns("google"))) selected = 2;
+        else if (dns.equals(TvDnsPolicy.providerDns("orange"))) selected = 3;
+        new AlertDialog.Builder(this).setTitle("DNS · " + profile.getDisplayName())
+                .setSingleChoiceItems(providers, selected, (dialog, index) -> {
+                    dialog.dismiss();
+                    if (index == 4) {
+                        showCustomDnsEditor(profile);
+                    } else {
+                        String value = index == 0 ? TvDnsPolicy.AUTO
+                                : TvDnsPolicy.providerDns(index == 1 ? "cloudflare"
+                                        : index == 2 ? "google" : "orange");
+                        prefs.edit().putString(key, value).apply();
+                        notifyDnsChanged(profile);
+                    }
+                }).setNegativeButton("Anuluj", null).show();
+    }
+
+    private void showCustomDnsEditor(TvGatewayProfile profile) {
+        String key = "blackserv_tv_dns_profile_" + profile.getTunerId();
+        var prefs = android.preference.PreferenceManager.getDefaultSharedPreferences(this);
         EditText input = input("Lokalny DNS tunera (IPv4 lub IPv6)");
-        input.setText(prefs.getString(key, defaultDns == null ? "" : defaultDns));
+        String previous = prefs.getString(key, TvDnsPolicy.AUTO);
+        if (previous != null && !TvDnsPolicy.AUTO.equals(previous)) input.setText(previous);
         new AlertDialog.Builder(this).setTitle("DNS " + profile.getDisplayName()).setView(input)
                 .setNegativeButton("Anuluj", null)
                 .setPositiveButton("Zapisz", (dialog, which) -> {
                     try {
                         String dns = TvDnsPolicy.validate(input.getText().toString());
                         prefs.edit().putString(key, dns).apply();
-                        if (profile.getTunerId().equals(TvGatewayStore.getActiveTunerId(this))) {
-                            showProblem("DNS zapisany. Rozłącz i połącz ponownie, aby uaktywnić nowy serwer.");
-                        }
+                        notifyDnsChanged(profile);
                     } catch (IllegalArgumentException invalid) {
                         showProblem(invalid.getMessage());
                     }
                 }).show();
+    }
+
+    private void notifyDnsChanged(TvGatewayProfile profile) {
+        if (profile.getTunerId().equals(TvGatewayStore.getActiveTunerId(this))) {
+            showProblem("DNS zapisany. Rozłącz i połącz ponownie, aby uaktywnić nowy serwer.");
+        } else {
+            Toast.makeText(this, "DNS profilu zapisany", Toast.LENGTH_SHORT).show();
+        }
     }
 
     private void showSettings() {
@@ -759,6 +800,18 @@ public final class TvHomeActivity extends AppCompatActivity {
         }).setNegativeButton("Wstecz", null).show();
     }
     private void document(int request) {
+        if (request == EXPORT) {
+            try {
+                String location = TvBackupExporter.save(this);
+                new AlertDialog.Builder(this).setTitle("Eksport zakończony")
+                        .setMessage("Zapisano ustawienia w: " + location
+                                + "\n\nKopia nie zawiera tożsamości ani kluczy ZeroTier.")
+                        .setPositiveButton("Zamknij", null).show();
+            } catch (Exception error) {
+                showProblem("Eksport: " + error.getMessage());
+            }
+            return;
+        }
         Intent pick = new Intent(request == EXPORT ? Intent.ACTION_CREATE_DOCUMENT : Intent.ACTION_OPEN_DOCUMENT);
         pick.addCategory(Intent.CATEGORY_OPENABLE); pick.setType("application/json");
         if (request == EXPORT) pick.putExtra(Intent.EXTRA_TITLE, "blackserv-zerotier-tv.json");

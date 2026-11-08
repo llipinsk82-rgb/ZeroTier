@@ -1,14 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="tv_canvas">#10191E</color>
-    <color name="tv_surface">#1D2D31</color>
-    <color name="tv_focus">#95E1D9</color>
+    <color name="tv_canvas">#0B141B</color>
+    <color name="tv_surface">#14232C</color>
+    <color name="tv_focus">#8CE4D5</color>
     <color name="tv_connected">#3AA37A</color>
-    <color name="tv_disconnected">#829397</color>
+    <color name="tv_disconnected">#829DA5</color>
     <color name="tv_pending">#F1BB60</color>
     <color name="tv_error">#D85B65</color>
     <color name="tv_text">#F4F8F7</color>
-    <color name="tv_muted">#B4C5C5</color>
+    <color name="tv_muted">#ADC4CB</color>
     <dimen name="tv_screen_inset">48dp</dimen>
     <dimen name="tv_card_min_height">112dp</dimen>
     <dimen name="tv_card_radius">18dp</dimen>

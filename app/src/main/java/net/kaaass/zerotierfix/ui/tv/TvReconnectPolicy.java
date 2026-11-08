@@ -12,4 +12,11 @@ public final class TvReconnectPolicy {
     public static boolean canReconnect(boolean selected, boolean connectivity, boolean vpnApproved) {
         return selected && connectivity && vpnApproved;
     }
+
+    /** Recover the chosen exit before considering a different tuner. */
+    public static boolean shouldRestartBeforeFailover(int consecutiveFailures, int previousRestarts,
+                                                      long nowMs, long previousRestartMs) {
+        return consecutiveFailures >= 3 && previousRestarts < 2
+                && (previousRestarts == 0 || nowMs - previousRestartMs >= 15000);
+    }
 }

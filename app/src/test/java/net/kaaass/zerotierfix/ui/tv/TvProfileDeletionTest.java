@@ -7,6 +7,9 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.widget.EditText;
 import net.kaaass.zerotierfix.events.NodeDestroyedEvent;
+import net.kaaass.zerotierfix.events.StopEvent;
+import org.greenrobot.eventbus.EventBus;
+import org.greenrobot.eventbus.Subscribe;
 import org.junit.*;
 import org.junit.runner.RunWith;
 import org.robolectric.Robolectric;
@@ -76,7 +79,7 @@ public class TvProfileDeletionTest {
         assertFalse("Re-added tuner must not inherit a removed profile's resolver",
                 prefs.contains("blackserv_tv_dns_profile_#5"));
     }
-    @Test public void automaticFallbackWaitsForRepeatedFailuresAndOldNodeShutdown() throws Exception {
+    @Test public void automaticRecoveryRetriesSelectedTunerBeforeFailover() throws Exception {
         TvGatewayStore.setActiveTunerId(context, "#5");
         java.lang.reflect.Method failover = TvHomeActivity.class.getDeclaredMethod(
                 "maybeAutomaticSwitch", int.class);
@@ -88,8 +91,8 @@ public class TvProfileDeletionTest {
 
         failover.invoke(controller.get(), 3);
         TvGatewayProfile next = (TvGatewayProfile) pending.get(controller.get());
-        assertNotNull("Repeated failures must select a configured alternate", next);
-        assertEquals("#9", next.getTunerId());
+        assertNotNull("Repeated failures must restart the selected tuner first", next);
+        assertEquals("#5", next.getTunerId());
         assertNull("Do not start another ZeroTier node before teardown",
                 TvGatewayStore.getActiveTunerId(context));
     }
@@ -138,6 +141,26 @@ public class TvProfileDeletionTest {
             started = requested.getTunerId();
         }
         assertEquals("#5", started);
+    }
+    public static class StopObserver {
+        int stops;
+        @Subscribe public void onStop(StopEvent ignored) { stops++; }
+    }
+    @Test public void switchingRequestsVpnTeardownEvenWhenAndroidBindsVpnService() throws Exception {
+        TvGatewayStore.setActiveTunerId(context, "#9");
+        java.lang.reflect.Field running = TvHomeActivity.class.getDeclaredField("serviceRunning");
+        running.setAccessible(true);
+        running.setBoolean(controller.get(), true);
+        StopObserver observer = new StopObserver();
+        EventBus.getDefault().register(observer);
+        try {
+            card("#5").performClick();
+            assertEquals("Must send explicit StopEvent; stopService alone does not terminate a system-bound VpnService",
+                    1, observer.stops);
+            assertNull("Replacement must wait until native node teardown", TvGatewayStore.getActiveTunerId(context));
+        } finally {
+            EventBus.getDefault().unregister(observer);
+        }
     }
     @Test public void staleSelectedProfileConnectsWithOneClickWhenServiceIsStopped() throws Exception {
         TvGatewayStore.setActiveTunerId(context, "#5");

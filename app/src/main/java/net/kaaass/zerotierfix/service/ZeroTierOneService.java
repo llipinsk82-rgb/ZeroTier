@@ -920,7 +920,10 @@ public class ZeroTierOneService extends VpnService implements Runnable, EventLis
         if (Build.VERSION.SDK_INT >= 29) {
             builder.setMetered(false);
         }
-        addDNSServers(builder, network);
+        if (!addDNSServers(builder, network)) {
+            this.eventBus.post(new VPNErrorEvent("Brak serwera DNS w wybranej sieci ZeroTier. Zmień DNS profilu."));
+            return false;
+        }
 
         // 配置 MTU
         int mtu = virtualNetworkConfig.getMtu();
@@ -1001,42 +1004,49 @@ public class ZeroTierOneService extends VpnService implements Runnable, EventLis
         return true;
     }
 
-    private void addDNSServers(VpnService.Builder builder, Network network) {
+    private boolean addDNSServers(VpnService.Builder builder, Network network) {
         var networkConfig = network.getNetworkConfig();
         var virtualNetworkConfig = getVirtualNetworkConfig(network.getNetworkId());
         var dnsMode = DNSMode.fromInt(networkConfig.getDnsMode());
+        int usableServers = 0;
 
         switch (dnsMode) {
             case NETWORK_DNS:
                 if (virtualNetworkConfig.getDns() == null) {
-                    return;
+                    return false;
                 }
-                builder.addSearchDomain(virtualNetworkConfig.getDns().getDomain());
+                String domain = virtualNetworkConfig.getDns().getDomain();
+                if (domain != null && !domain.isEmpty()) builder.addSearchDomain(domain);
+                if (virtualNetworkConfig.getDns().getServers() == null) return false;
                 for (var inetSocketAddress : virtualNetworkConfig.getDns().getServers()) {
                     InetAddress address = inetSocketAddress.getAddress();
                     if (address instanceof Inet4Address) {
                         builder.addDnsServer(address);
+                        usableServers++;
                     } else if ((address instanceof Inet6Address) && !this.disableIPv6) {
                         builder.addDnsServer(address);
+                        usableServers++;
                     }
                 }
-                break;
+                return usableServers > 0;
             case CUSTOM_DNS:
                 for (var dnsServer : networkConfig.getDnsServers()) {
                     try {
                         InetAddress byName = InetAddress.getByName(dnsServer.getNameserver());
                         if (byName instanceof Inet4Address) {
                             builder.addDnsServer(byName);
+                            usableServers++;
                         } else if ((byName instanceof Inet6Address) && !this.disableIPv6) {
                             builder.addDnsServer(byName);
+                            usableServers++;
                         }
                     } catch (Exception e) {
                         Log.e(TAG, "Exception parsing DNS server: " + e, e);
                     }
                 }
-                break;
+                return usableServers > 0;
             default:
-                break;
+                return true; // Legacy NO_DNS is a deliberate separate mode.
         }
     }
 

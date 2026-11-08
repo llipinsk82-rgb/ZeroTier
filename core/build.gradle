@@ -5,6 +5,12 @@ plugins {
 android {
     compileSdkVersion rootProject.ext.compileSdkVersion
 
+    // The ZeroTier SDK remains an upstream git submodule. Gradle must read its
+    // Java/JNI bindings directly; they are not copied into core/src/main/java.
+    sourceSets {
+        main.java.srcDirs += ['../externals/core/java/src']
+    }
+
     defaultConfig {
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion

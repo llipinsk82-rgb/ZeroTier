@@ -40,8 +40,10 @@ public class NDPTable {
                         }
                     }
                     Thread.sleep(1000);
+                } catch (InterruptedException ignored) {
+                    return;
                 } catch (Exception e) {
-                    Log.d(NDPTable.TAG, e.toString());
+                    Log.w(NDPTable.TAG, "NDP cache maintenance failed", e);
                     return;
                 }
             }

@@ -15,8 +15,8 @@ android {
         applicationId "uk.blackserv.zerotiertv"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 22
-        versionName "3.0.0-tv-beta.1"
+        versionCode 23
+        versionName "3.0.0-tv-beta.2"
         multiDexEnabled true
 
         testInstrumentationRunner 'androidx.test.runner.AndroidJUnitRunner'
@@ -29,6 +29,7 @@ android {
         // when the original production signing key is unavailable.
         candidate {
             initWith debug
+            debuggable false
             applicationIdSuffix '.candidate'
             versionNameSuffix '-candidate'
             matchingFallbacks = ['debug']

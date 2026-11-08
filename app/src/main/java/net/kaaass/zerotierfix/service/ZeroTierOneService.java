@@ -451,18 +451,19 @@ public class ZeroTierOneService extends VpnService implements Runnable, EventLis
         }
         if (this.udpThread != null && this.udpThread.isAlive()) {
             this.udpThread.interrupt();
-            try {
-                this.udpThread.join();
-            } catch (InterruptedException ignored) {
+            // A UDP error may initiate shutdown from its own worker thread.
+            if (this.udpThread != Thread.currentThread()) {
+                try {
+                    this.udpThread.join();
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
             }
             this.udpThread = null;
         }
-        if (this.tunTapAdapter != null && this.tunTapAdapter.isRunning()) {
+        if (this.tunTapAdapter != null) {
+            // Reclaim lookup workers even if the TUN receiver never started.
             this.tunTapAdapter.interrupt();
-            try {
-                this.tunTapAdapter.join();
-            } catch (InterruptedException ignored) {
-            }
             this.tunTapAdapter = null;
         }
         if (this.vpnThread != null && this.vpnThread.isAlive()) {
@@ -811,11 +812,7 @@ public class ZeroTierOneService extends VpnService implements Runnable, EventLis
 
         // 重启 TUN TAP
         if (this.tunTapAdapter.isRunning()) {
-            this.tunTapAdapter.interrupt();
-            try {
-                this.tunTapAdapter.join();
-            } catch (InterruptedException ignored) {
-            }
+            this.tunTapAdapter.interrupt(); // also joins and cleans lookup tables
         }
         this.tunTapAdapter.clearRouteMap();
 

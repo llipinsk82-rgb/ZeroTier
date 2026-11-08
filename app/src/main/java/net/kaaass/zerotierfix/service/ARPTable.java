@@ -24,7 +24,6 @@ public class ARPTable {
                 try {
                     for (ARPEntry arpEntry : new HashMap<>(ARPTable.this.entriesMap).values()) {
                         if (arpEntry.getTime() + ARPTable.ENTRY_TIMEOUT < System.currentTimeMillis()) {
-                            Log.d(ARPTable.TAG, "Removing " + arpEntry.getAddress().toString() + " from ARP cache");
                             synchronized (ARPTable.this.macAddressToInetAdddress) {
                                 ARPTable.this.macAddressToInetAdddress.remove(arpEntry.getMac());
                             }
@@ -40,8 +39,7 @@ public class ARPTable {
                         }
                     }
                     Thread.sleep(1000);
-                } catch (InterruptedException e) {
-                    Log.e(ARPTable.TAG, "Tun/Tap Interrupted", e);
+                } catch (InterruptedException ignored) {
                     break;
                 } catch (Exception e) {
                     Log.d(ARPTable.TAG, e.toString());
@@ -110,7 +108,6 @@ public class ARPTable {
             if (!this.inetAddressToMacAddress.containsKey(inetAddress)) {
                 return -1;
             }
-            Log.d(TAG, "Returning MAC for " + inetAddress.toString());
             var longValue = this.inetAddressToMacAddress.get(inetAddress);
             if (longValue != null) {
                 updateArpEntryTime(longValue);
@@ -176,7 +173,6 @@ public class ARPTable {
     public ARPReplyData processARPPacket(byte[] packetData) {
         InetAddress srcAddress;
         InetAddress dstAddress;
-        Log.d(TAG, "Processing ARP packet");
 
         // 解析包内 IP、MAC 地址
         byte[] rawSrcMac = new byte[8];
@@ -212,7 +208,6 @@ public class ARPTable {
         var packetType = packetData[7];
         if (packetType == REQUEST) {
             // ARP 请求，返回应答数据
-            Log.d(TAG, "Reply needed");
             return new ARPReplyData(srcMac, srcAddress);
         } else {
             return null;
